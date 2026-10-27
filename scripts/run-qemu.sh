@@ -3,7 +3,8 @@
 #
 #   scripts/run-qemu.sh [tcg|kvm]    default: tcg
 #
-#   tcg  enters at EL2 like the O6 (virtualization=on, -cpu max), with an SMMUv3
+#   tcg  enters at EL2 like the O6 (virtualization=on, -cpu max), with an
+#        SMMUv3 and emulated MTE tag memory (mte=on)
 #   kvm  runs on the O6's own CPU cores at EL1, with MTE passed through
 #        (-cpu host -accel kvm, mte=on)
 #
@@ -19,7 +20,7 @@ mode=${1:-tcg}
 root=$(cd "$(dirname "$0")/.." && pwd)
 
 case $mode in
-  tcg) machine=(-M virt,gic-version=3,virtualization=on,iommu=smmuv3 -cpu max -smp 4) ;;
+  tcg) machine=(-M virt,gic-version=3,virtualization=on,iommu=smmuv3,mte=on -cpu max -smp 4) ;;
   kvm) machine=(-M virt,gic-version=3,mte=on -cpu host -accel kvm -smp 4) ;;
   *) echo "usage: $0 [tcg|kvm]" >&2; exit 2 ;;
 esac

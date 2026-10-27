@@ -22,6 +22,7 @@ mod cpu;
 mod firmware;
 mod gic;
 mod mmio;
+mod mte;
 mod percore;
 mod report;
 mod smmu;
@@ -98,6 +99,12 @@ fn main() -> Status {
 
     r.section("G. All cores");
     percore::report(&mut r, &ids, madt.as_ref());
+    r.flush();
+
+    // Last, because it is the only probe that changes CPU memory settings.
+    r.section("H. MTE tag storage");
+    r.flush();
+    mte::report(&mut r, &ids);
     r.flush();
 
     if r.file_error.is_none() {

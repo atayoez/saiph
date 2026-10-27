@@ -3,7 +3,7 @@
 #
 #   scripts/run-qemu.sh [tcg|kvm]    default: tcg
 #
-#   tcg  enters at EL2 like the O6 (virtualization=on, -cpu max)
+#   tcg  enters at EL2 like the O6 (virtualization=on, -cpu max), with an SMMUv3
 #   kvm  runs on the O6's own CPU cores at EL1, with MTE passed through
 #        (-cpu host -accel kvm, mte=on)
 #
@@ -18,17 +18,17 @@ mode=${1:-tcg}
 root=$(cd "$(dirname "$0")/.." && pwd)
 
 case $mode in
-  tcg) machine=(-M virt,gic-version=3,virtualization=on -cpu max) ;;
-  kvm) machine=(-M virt,gic-version=3,mte=on -cpu host -accel kvm) ;;
+  tcg) machine=(-M virt,gic-version=3,virtualization=on,iommu=smmuv3 -cpu max -smp 4) ;;
+  kvm) machine=(-M virt,gic-version=3,mte=on -cpu host -accel kvm -smp 4) ;;
   *) echo "usage: $0 [tcg|kvm]" >&2; exit 2 ;;
 esac
 
 cargo build --manifest-path "$root/Cargo.toml" -p probe --target aarch64-unknown-uefi
 
 esp=$root/target/esp
-# Create the report folder on the host: QEMU's emulated FAT disk (vvfat)
+# Create the report folders on the host: QEMU's emulated FAT disk (vvfat)
 # crashes when the guest creates a new directory.
-mkdir -p "$esp/EFI/BOOT" "$esp/EFI/orion-probe"
+mkdir -p "$esp/EFI/BOOT" "$esp/EFI/orion-probe/acpi"
 cp "$root/target/aarch64-unknown-uefi/debug/probe.efi" "$esp/EFI/BOOT/BOOTAA64.EFI"
 
 log=$root/target/serial.log

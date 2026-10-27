@@ -44,6 +44,9 @@ fn main() -> Status {
     };
     println!("  MTE: {mte_desc} (MTE={mte})");
 
+    // scripts/run-qemu.sh stops QEMU when it sees this line.
+    println!("Probe finished.");
+
     // Leave the text on screen long enough to read it on the real board.
     boot::stall(Duration::from_secs(10));
     Status::SUCCESS

@@ -19,7 +19,10 @@ macro_rules! read_sysreg {
 
 mod acpi;
 mod cpu;
+mod gic;
+mod mmio;
 mod report;
+mod smmu;
 
 use core::time::Duration;
 use report::{Report, say};
@@ -67,6 +70,15 @@ fn main() -> Status {
     }
     for base in &smmus {
         say!(r, "SMMUv3 unit (IORT) at {base:#x}");
+    }
+    r.flush();
+
+    r.section("D. Interrupt controller and SMMU");
+    if let Some(m) = &madt {
+        gic::report(&mut r, m);
+    }
+    for &base in &smmus {
+        smmu::report(&mut r, base);
     }
     r.flush();
 

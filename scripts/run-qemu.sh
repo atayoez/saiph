@@ -7,11 +7,12 @@
 #   kvm  runs on the O6's own CPU cores at EL1, with MTE passed through
 #        (-cpu host -accel kvm, mte=on)
 #
-# The probe boots as \EFI\BOOT\BOOTAA64.EFI from target/esp, because this
-# firmware has no UEFI Shell. The folder is writable, so the probe's
-# \EFI\orion-probe\report.txt lands in target/esp/EFI/orion-probe/. QEMU
-# stops by itself once the probe prints "Probe finished."; quit earlier with
-# Ctrl+A, then X. The whole serial output is also kept in target/serial.log.
+# Each run builds a fresh FAT disk image (a virtual USB stick) holding the
+# probe as \EFI\BOOT\BOOTAA64.EFI, because this firmware has no UEFI Shell.
+# Afterwards everything the probe wrote under \EFI\orion-probe is copied to
+# target/qemu/out/ and report.txt is printed. QEMU stops by itself once the
+# probe prints "Probe finished."; quit earlier with Ctrl+A, then X. The whole
+# serial output is kept in target/qemu/serial.log. Needs mtools.
 set -euo pipefail
 
 mode=${1:-tcg}
@@ -25,15 +26,19 @@ esac
 
 cargo build --manifest-path "$root/Cargo.toml" -p probe --target aarch64-unknown-uefi
 
-esp=$root/target/esp
-# Create the report folders on the host: QEMU's emulated FAT disk (vvfat)
-# crashes when the guest creates a new directory.
-mkdir -p "$esp/EFI/BOOT" "$esp/EFI/orion-probe/acpi"
-cp "$root/target/aarch64-unknown-uefi/debug/probe.efi" "$esp/EFI/BOOT/BOOTAA64.EFI"
+work=$root/target/qemu
+img=$work/esp.img
+log=$work/serial.log
+pidfile=$work/qemu.pid
+rm -rf "$work"
+mkdir -p "$work"
 
-log=$root/target/serial.log
-pidfile=$root/target/qemu.pid
-rm -f "$pidfile"
+# A 64 MiB FAT32 image without a partition table, like a USB stick
+# formatted as one big FAT volume. mkfs.fat works on a plain file as a
+# normal user; mtools copies files in and out without mounting anything.
+/usr/sbin/mkfs.fat -C -F 32 -n PROBE "$img" 65536 >/dev/null
+mmd -i "$img" ::/EFI ::/EFI/BOOT
+mcopy -i "$img" "$root/target/aarch64-unknown-uefi/debug/probe.efi" ::/EFI/BOOT/BOOTAA64.EFI
 : > "$log"
 
 # When the probe returns, the firmware's boot manager moves on to network
@@ -41,7 +46,6 @@ rm -f "$pidfile"
 # probe says it is done.
 (
   until grep -aq 'Probe finished\.' "$log"; do sleep 0.5; done
-  sleep 1 # give QEMU's emulated FAT disk a moment to write the report through
   kill "$(cat "$pidfile")" 2>/dev/null || true
 ) &
 watcher=$!
@@ -50,11 +54,10 @@ trap 'kill $watcher 2>/dev/null || true' EXIT
 qemu-system-aarch64 "${machine[@]}" -m 1G \
   -drive if=pflash,format=raw,readonly=on,file=/usr/share/qemu/aavmf-aarch64-code.bin \
   -drive if=pflash,format=raw,snapshot=on,file=/usr/share/qemu/aavmf-aarch64-vars.bin \
-  -drive if=virtio,format=raw,file=fat:rw:"$esp" \
+  -drive if=virtio,format=raw,file="$img" \
   -nographic -pidfile "$pidfile" | tee "$log"
 
-report=$esp/EFI/orion-probe/report.txt
-if [[ -f $report ]]; then
-  printf '\n== %s ==\n' "$report"
-  cat "$report"
+if mcopy -s -n -i "$img" ::/EFI/orion-probe "$work/out" 2>/dev/null; then
+  printf '\n== %s ==\n' "$work/out/report.txt"
+  cat "$work/out/report.txt"
 fi

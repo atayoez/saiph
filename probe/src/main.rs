@@ -22,6 +22,7 @@ mod cpu;
 mod firmware;
 mod gic;
 mod mmio;
+mod percore;
 mod report;
 mod smmu;
 
@@ -93,6 +94,10 @@ fn main() -> Status {
     r.section("F. Firmware and network boot");
     firmware::report_identity(&mut r);
     firmware::report_network_boot(&mut r);
+    r.flush();
+
+    r.section("G. All cores");
+    percore::report(&mut r, &ids, madt.as_ref());
     r.flush();
 
     if r.file_error.is_none() {

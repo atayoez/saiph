@@ -10,8 +10,11 @@ pub fn field(reg: u64, lsb: u32) -> u64 {
     (reg >> lsb) & 0xf
 }
 
-/// Raw values of the registers this module decodes.
-#[derive(Clone, Copy, Default)]
+/// Raw values of the registers this module decodes. The layout is shared
+/// with the assembly routine below: 13 registers, then CCSIDR for cache
+/// levels 1..7 as [data or unified, instruction].
+#[repr(C)]
+#[derive(Clone, Copy, Default, PartialEq)]
 pub struct Ids {
     pub midr: u64,
     pub mpidr: u64,
@@ -26,26 +29,79 @@ pub struct Ids {
     pub dfr0: u64,
     pub zfr0: u64,
     pub clidr: u64,
+    pub ccsidr: [[u64; 2]; 7],
+}
+
+// Reads every register in `Ids` on the core it runs on. It uses no stack,
+// no floating point and no firmware calls, so it can also run on the other
+// cores (group G). CSSELR_EL1 selects which cache CCSIDR_EL1 describes:
+// bits 3..1 are the level minus one and bit 0 picks the instruction cache.
+// CSSELR only affects this core and is put back at the end; interrupts are
+// masked meanwhile.
+core::arch::global_asm!(
+    ".global orion_probe_read_ids",
+    ".p2align 2",
+    "orion_probe_read_ids:",
+    "mrs x1, MIDR_EL1",         "str x1, [x0, #0]",
+    "mrs x1, MPIDR_EL1",        "str x1, [x0, #8]",
+    "mrs x1, ID_AA64PFR0_EL1",  "str x1, [x0, #16]",
+    "mrs x1, ID_AA64PFR1_EL1",  "str x1, [x0, #24]",
+    "mrs x1, ID_AA64ISAR0_EL1", "str x1, [x0, #32]",
+    "mrs x1, ID_AA64ISAR1_EL1", "str x1, [x0, #40]",
+    "mrs x1, ID_AA64ISAR2_EL1", "str x1, [x0, #48]",
+    "mrs x1, ID_AA64MMFR0_EL1", "str x1, [x0, #56]",
+    "mrs x1, ID_AA64MMFR1_EL1", "str x1, [x0, #64]",
+    "mrs x1, ID_AA64MMFR2_EL1", "str x1, [x0, #72]",
+    "mrs x1, ID_AA64DFR0_EL1",  "str x1, [x0, #80]",
+    // ID_AA64ZFR0_EL1 by its encoding: the assembler only knows the name
+    // when SVE is enabled for the whole program.
+    "mrs x1, S3_0_C0_C4_4",     "str x1, [x0, #88]",
+    "mrs x1, CLIDR_EL1",        "str x1, [x0, #96]",
+    "mrs x5, DAIF",
+    "msr DAIFSet, #3",
+    "mrs x4, CSSELR_EL1",
+    "add x2, x0, #104",
+    "mov x3, #0",
+    "1:",
+    "msr CSSELR_EL1, x3", "isb", "mrs x1, CCSIDR_EL1", "str x1, [x2], #8",
+    "orr x6, x3, #1",
+    "msr CSSELR_EL1, x6", "isb", "mrs x1, CCSIDR_EL1", "str x1, [x2], #8",
+    "add x3, x3, #2",
+    "cmp x3, #14",
+    "b.lo 1b",
+    "msr CSSELR_EL1, x4",
+    "isb",
+    "msr DAIF, x5",
+    "dsb sy",
+    "ret",
+);
+
+unsafe extern "efiapi" {
+    pub fn orion_probe_read_ids(ids: *mut Ids);
 }
 
 impl Ids {
+    /// Read the registers of the core this runs on.
     pub fn read() -> Self {
-        Ids {
-            midr: read_sysreg!("MIDR_EL1"),
-            mpidr: read_sysreg!("MPIDR_EL1"),
-            pfr0: read_sysreg!("ID_AA64PFR0_EL1"),
-            pfr1: read_sysreg!("ID_AA64PFR1_EL1"),
-            isar0: read_sysreg!("ID_AA64ISAR0_EL1"),
-            isar1: read_sysreg!("ID_AA64ISAR1_EL1"),
-            isar2: read_sysreg!("ID_AA64ISAR2_EL1"),
-            mmfr0: read_sysreg!("ID_AA64MMFR0_EL1"),
-            mmfr1: read_sysreg!("ID_AA64MMFR1_EL1"),
-            mmfr2: read_sysreg!("ID_AA64MMFR2_EL1"),
-            dfr0: read_sysreg!("ID_AA64DFR0_EL1"),
-            // ID_AA64ZFR0_EL1 by its encoding: the assembler only knows the
-            // name when SVE is enabled for the whole program.
-            zfr0: read_sysreg!("S3_0_C0_C4_4"),
-            clidr: read_sysreg!("CLIDR_EL1"),
+        let mut ids = Ids::default();
+        // SAFETY: the routine only reads ID registers (and restores the
+        // cache selector) and writes into `ids`, whose layout it matches.
+        unsafe { orion_probe_read_ids(&mut ids) };
+        ids.tidy();
+        ids
+    }
+
+    /// Clear CCSIDR values of caches that CLIDR says do not exist: for a
+    /// missing cache the CPU returns an unspecified value.
+    pub fn tidy(&mut self) {
+        for level in 0..7 {
+            let kind = (self.clidr >> (3 * level)) & 7;
+            if !(2..=4).contains(&kind) {
+                self.ccsidr[level][0] = 0;
+            }
+            if kind != 1 && kind != 3 {
+                self.ccsidr[level][1] = 0;
+            }
         }
     }
 }
@@ -198,33 +254,49 @@ pub fn report_ids(r: &mut Report, ids: &Ids) {
     say!(r, "  TRBE (trace buffer): {} (TraceBuffer={trbe})", yes(trbe));
 }
 
-/// Read the size of one cache. CSSELR_EL1 selects which cache CCSIDR_EL1
-/// describes: bits 3..1 are the level minus one, bit 0 picks the
-/// instruction cache. CSSELR only affects this CPU and is restored afterwards.
-fn ccsidr(level: u64, instruction: bool) -> u64 {
-    let select = ((level - 1) << 1) | instruction as u64;
-    let old = read_sysreg!("CSSELR_EL1");
-    let value: u64;
-    // SAFETY: selecting a cache to describe has no effect beyond which value
-    // CCSIDR_EL1 shows; the old selection is put back.
-    unsafe {
-        core::arch::asm!(
-            "msr CSSELR_EL1, {sel}",
-            "isb",
-            "mrs {val}, CCSIDR_EL1",
-            "msr CSSELR_EL1, {old}",
-            "isb",
-            sel = in(reg) select,
-            old = in(reg) old,
-            val = out(reg) value,
-        )
+/// (bytes, ways, sets, line bytes) of one cache from its CCSIDR value.
+/// FEAT_CCIDX (MMFR2 bits 23..20) widens the ways and sets fields.
+pub fn cache_size(c: u64, ccidx: bool) -> (u64, u64, u64, u64) {
+    let line = 16u64 << (c & 7); // bits 2..0: log2(bytes) - 4
+    let (ways, sets) = if ccidx {
+        (((c >> 3) & 0x1f_ffff) + 1, ((c >> 32) & 0xff_ffff) + 1)
+    } else {
+        (((c >> 3) & 0x3ff) + 1, ((c >> 13) & 0x7fff) + 1)
     };
-    value
+    (line * ways * sets, ways, sets, line)
+}
+
+/// "64K", "12M" or "64B".
+pub fn size(bytes: u64) -> alloc::string::String {
+    match bytes {
+        b if b >= 1 << 20 && b % (1 << 20) == 0 => alloc::format!("{}M", b >> 20),
+        b if b >= 1 << 10 => alloc::format!("{}K", b >> 10),
+        b => alloc::format!("{b}B"),
+    }
+}
+
+/// One short line per core, e.g. "L1 64K/64K, L2 512K, L3 12M".
+pub fn cache_summary(ids: &Ids) -> alloc::string::String {
+    let ccidx = field(ids.mmfr2, 20) != 0;
+    let mut parts = alloc::vec::Vec::new();
+    for level in 0..7 {
+        let kind = (ids.clidr >> (3 * level)) & 7;
+        if kind == 0 {
+            break;
+        }
+        let d = size(cache_size(ids.ccsidr[level][0], ccidx).0);
+        let i = size(cache_size(ids.ccsidr[level][1], ccidx).0);
+        parts.push(match kind {
+            1 => alloc::format!("L{} {i}(I)", level + 1),
+            3 => alloc::format!("L{} {d}/{i}", level + 1),
+            _ => alloc::format!("L{} {d}", level + 1),
+        });
+    }
+    parts.join(", ")
 }
 
 pub fn report_caches(r: &mut Report, ids: &Ids) {
     say!(r, "CLIDR_EL1 = {:#018x}", ids.clidr);
-    // FEAT_CCIDX (MMFR2 bits 23..20) widens the CCSIDR fields.
     let ccidx = field(ids.mmfr2, 20) != 0;
     for level in 1..=7u64 {
         // CLIDR holds a 3-bit type per level: 1 = instruction only,
@@ -239,15 +311,9 @@ pub fn report_caches(r: &mut Report, ids: &Ids) {
             _ => &[],
         };
         for &(name, instruction) in caches {
-            let c = ccsidr(level, instruction);
-            let line = 16u64 << (c & 7); // bits 2..0: log2(bytes) - 4
-            let (ways, sets) = if ccidx {
-                (((c >> 3) & 0x1f_ffff) + 1, ((c >> 32) & 0xff_ffff) + 1)
-            } else {
-                (((c >> 3) & 0x3ff) + 1, ((c >> 13) & 0x7fff) + 1)
-            };
-            let kib = line * ways * sets / 1024;
-            say!(r, "  L{level} {name:<11} {kib:>6} KiB  {ways:>2}-way  {sets:>5} sets  {line} B lines  (CCSIDR={c:#x})");
+            let c = ids.ccsidr[level as usize - 1][instruction as usize];
+            let (bytes, ways, sets, line) = cache_size(c, ccidx);
+            say!(r, "  L{level} {name:<11} {:>6}  {ways:>2}-way  {sets:>5} sets  {line} B lines  (CCSIDR={c:#x})", size(bytes));
         }
     }
 }

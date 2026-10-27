@@ -1,0 +1,11 @@
+Hello from the Orion probe
+Running at EL2
+ID_AA64PFR1_EL1 = 0x0000000000010321
+  BTI: present (BT=1)
+  MTE: full tag checking plus asymmetric mode (MTE3) (MTE=3)
+ID_AA64ISAR1_EL1 = 0x0111111100211002
+ID_AA64ISAR2_EL1 = 0x0000000001005102
+  PAuth, QARMA5 algorithm (APA):  not implemented (APA=0)
+  PAuth, vendor algorithm (API):  not implemented (API=0)
+  PAuth, QARMA3 algorithm (APA3): PAuth2 + FPAC + FPACCOMBINE (APA3=5)
+  Generic signing (PACGA):        QARMA3 (GPA=0 GPI=0 GPA3=1)

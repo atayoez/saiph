@@ -4,4 +4,4 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-uefi = { version = "0.41", features = ["panic_handler"] }
+uefi = { version = "0.41", features = ["panic_handler", "alloc", "global_allocator"] }

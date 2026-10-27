@@ -19,6 +19,7 @@ macro_rules! read_sysreg {
 
 mod acpi;
 mod cpu;
+mod firmware;
 mod gic;
 mod mmio;
 mod report;
@@ -80,6 +81,18 @@ fn main() -> Status {
     for &base in &smmus {
         smmu::report(&mut r, base);
     }
+    r.flush();
+
+    r.section("E. Entropy");
+    let rndr = cpu::field(ids.isar0, 60);
+    say!(r, "RNDR instruction: {}", if rndr >= 1 { "present" } else { "absent" });
+    firmware::report_efi_rng(&mut r);
+    firmware::report_smccc(&mut r, &ids, &tables);
+    r.flush();
+
+    r.section("F. Firmware and network boot");
+    firmware::report_identity(&mut r);
+    firmware::report_network_boot(&mut r);
     r.flush();
 
     if r.file_error.is_none() {

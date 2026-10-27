@@ -2,7 +2,8 @@
 # Run the probe on the O6 itself (bare metal, entered at EL2) via systemd-boot.
 #
 #   scripts/board.sh install   build, copy to the ESP, run it once on the next boot
-#   scripts/board.sh report    show the bare-metal report and commit a copy to reports/
+#   scripts/board.sh report    show the bare-metal report; commit it and the ACPI
+#                              dump to reports/board-<time the probe ran>/
 #   scripts/board.sh remove    delete the probe and its menu entry from the ESP
 #
 # The ESP (/boot/efi) is root-only, so each subcommand does its ESP work in
@@ -34,7 +35,7 @@ case ${1:-} in
       set -e
       mkdir -p "$1/EFI/orion-probe"
       cp "$2" "$1/EFI/orion-probe/probe.efi"
-      rm -f "$1/EFI/orion-probe/report.txt"
+      rm -rf "$1/EFI/orion-probe/report.txt" "$1/EFI/orion-probe/acpi"
       printf "title   Orion probe\nefi     /EFI/orion-probe/probe.efi\n" > "$1/loader/entries/$3"
       bootctl set-oneshot "$3"
     ' sh "$esp" "$efi" "$entry"
@@ -50,27 +51,29 @@ case ${1:-} in
     ;;
 
   report)
-    # One root call: the report's modification time (when the probe wrote
-    # it), then its contents.
-    out=$(pkexec sh -c 'f="$1/EFI/orion-probe/report.txt"; [ -f "$f" ] || exit 3; stat -c %Y "$f"; cat "$f"' sh "$esp") || {
+    # One root call: pack report.txt and the acpi folder into a tar stream;
+    # tar keeps each file's time, so report.txt's time says when the probe ran.
+    tmp=$(mktemp -d)
+    trap 'rm -rf "$tmp"' EXIT
+    if ! pkexec sh -c 'cd "$1/EFI/orion-probe" && [ -f report.txt ] && tar -cf - report.txt $(ls -d acpi 2>/dev/null)' sh "$esp" | tar -xf - -C "$tmp"; then
       echo "No report on the ESP. Run 'scripts/board.sh install' and reboot first." >&2
       exit 1
-    }
-    written=$(head -n1 <<<"$out")
-    text=$(tail -n +2 <<<"$out")
-    printf '%s\n' "$text"
+    fi
+    cat "$tmp/report.txt"
 
-    mkdir -p "$root/reports"
-    copy=$root/reports/board-$(date -d "@$written" +%Y-%m-%d-%H%M).txt
-    if [[ -f $copy ]]; then
+    stamp=$(date -r "$tmp/report.txt" +%Y-%m-%d-%H%M)
+    dest=$root/reports/board-$stamp
+    if [[ -e $dest ]]; then
       echo
-      echo "Already saved as ${copy#"$root"/}"
+      echo "Already saved as ${dest#"$root"/}/"
     else
-      printf '%s\n' "$text" > "$copy"
-      git -C "$root" add -- "$copy"
-      git -C "$root" commit -q -m "Add bare-metal probe report from $(date -d "@$written" '+%Y-%m-%d %H:%M')" -- "$copy"
+      mkdir -p "$root/reports"
+      cp -r "$tmp" "$dest"
+      chmod -R u+rw,go+r "$dest"
+      git -C "$root" add -- "$dest"
+      git -C "$root" commit -q -m "Add bare-metal probe report from $(date -r "$tmp/report.txt" '+%Y-%m-%d %H:%M')" -- "$dest"
       echo
-      echo "Saved and committed as ${copy#"$root"/}"
+      echo "Saved and committed as ${dest#"$root"/}/"
     fi
     ;;
 

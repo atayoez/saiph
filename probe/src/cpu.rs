@@ -317,3 +317,61 @@ pub fn report_caches(r: &mut Report, ids: &Ids) {
         }
     }
 }
+
+/// Names of the sixteen 4-bit fields (bits 3..0 first) of the ID registers
+/// in `Ids`, from the Arm Architecture Reference Manual. "-" = reserved.
+pub fn field_names(register: &str) -> [&'static str; 16] {
+    match register {
+        "PFR0" => ["EL0", "EL1", "EL2", "EL3", "FP", "AdvSIMD", "GIC", "RAS", "SVE", "SEL2", "MPAM", "AMU", "DIT", "RME", "CSV2", "CSV3"],
+        "PFR1" => ["BT", "SSBS", "MTE", "RAS_frac", "MPAM_frac", "-", "SME", "RNDR_trap", "CSV2_frac", "NMI", "MTE_frac", "GCS", "THE", "MTEX", "DF2", "PFAR"],
+        "ISAR0" => ["-", "AES", "SHA1", "SHA2", "CRC32", "Atomic", "TME", "RDM", "SHA3", "SM3", "SM4", "DP", "FHM", "TS", "TLB", "RNDR"],
+        "ISAR1" => ["DPB", "APA", "API", "JSCVT", "FCMA", "LRCPC", "GPA", "GPI", "FRINTTS", "SB", "SPECRES", "BF16", "DGH", "I8MM", "XS", "LS64"],
+        "ISAR2" => ["WFxT", "RPRES", "GPA3", "APA3", "MOPS", "BC", "PAC_frac", "CLRBHB", "SYSREG_128", "SYSINSTR_128", "PRFMSLC", "-", "RPRFM", "CSSC", "LUT", "ATS1A"],
+        "MMFR0" => ["PARange", "ASIDBits", "BigEnd", "SNSMem", "BigEndEL0", "TGran16", "TGran64", "TGran4", "TGran16_2", "TGran64_2", "TGran4_2", "ExS", "-", "-", "FGT", "ECV"],
+        "MMFR1" => ["HAFDBS", "VMIDBits", "VH", "HPDS", "LO", "PAN", "SpecSEI", "XNX", "TWED", "ETS", "HCX", "AFP", "nTLBPA", "TIDCP1", "CMOW", "ECBHB"],
+        "MMFR2" => ["CnP", "UAO", "LSM", "IESB", "VARange", "CCIDX", "NV", "ST", "AT", "IDS", "FWB", "-", "TTL", "BBM", "EVT", "E0PD"],
+        "DFR0" => ["DebugVer", "TraceVer", "PMUVer", "BRPs", "PMSS", "WRPs", "SEBEP", "CTX_CMPs", "PMSVer", "DoubleLock", "TraceFilt", "TraceBuffer", "MTPMU", "BRBE", "ExtTrcBuff", "HPMN0"],
+        "ZFR0" => ["SVEver", "AES", "-", "-", "BitPerm", "BF16", "B16B16", "-", "SHA3", "-", "SM4", "I8MM", "-", "F32MM", "F64MM", "-"],
+        _ => ["?"; 16],
+    }
+}
+
+/// One-line meaning of a field, for the ones that are likely to differ
+/// between the O6's two core types (memory-model and debug features).
+pub fn field_meaning(name: &str) -> &'static str {
+    match name {
+        "HAFDBS" => "hardware updates of the page-table Access flag and Dirty state",
+        "VMIDBits" => "size of VM IDs in the TLB (0 = 8 bits, 2 = 16 bits)",
+        "VH" => "VHE: the kernel can run at EL2",
+        "HPDS" => "hierarchical permission disables in page tables",
+        "LO" => "LORegions (limited-ordering memory regions)",
+        "PAN" => "Privileged Access Never (kernel cannot touch user memory by accident)",
+        "SpecSEI" => "SError on speculative reads",
+        "XNX" => "separate execute-never for EL0 and EL1 at stage 2",
+        "TWED" => "configurable delay before trapping WFE",
+        "ETS" => "enhanced translation synchronization",
+        "HCX" => "the HCRX_EL2 register exists",
+        "AFP" => "alternate floating-point behaviour controls",
+        "nTLBPA" => "how the TLB caches intermediate page-table entries",
+        "TIDCP1" => "traps of IMPLEMENTATION DEFINED registers at EL0",
+        "CMOW" => "cache maintenance needs write permission",
+        "ECBHB" => "hardware mitigation of branch-history (Spectre-BHB) attacks",
+        "DebugVer" => "debug architecture version",
+        "TraceVer" => "trace unit with a system-register interface",
+        "PMUVer" => "performance monitor (PMU) version",
+        "BRPs" => "number of hardware breakpoints, minus 1",
+        "PMSS" => "PMU snapshot extension",
+        "WRPs" => "number of hardware watchpoints, minus 1",
+        "SEBEP" => "synchronous-exception-based event profiling",
+        "CTX_CMPs" => "number of context-aware breakpoints, minus 1",
+        "PMSVer" => "Statistical Profiling Extension (SPE) version",
+        "DoubleLock" => "OS double-lock (0xf = not implemented)",
+        "TraceFilt" => "trace filtering (TRF)",
+        "TraceBuffer" => "trace buffer extension (TRBE)",
+        "MTPMU" => "multi-threaded PMU events",
+        "BRBE" => "branch record buffer (BRBE)",
+        "ExtTrcBuff" => "external trace buffer access",
+        "HPMN0" => "all PMU counters can be reserved for EL2",
+        _ => "see the register's page in the Arm ARM",
+    }
+}

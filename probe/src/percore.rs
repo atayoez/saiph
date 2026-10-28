@@ -46,12 +46,13 @@ fn differences(a: &Ids, b: &Ids) -> Vec<&'static str> {
     out
 }
 
-fn print_core(r: &mut Report, i: usize, mpidr: u64, eff: Option<u8>, boot_core: &Ids, ids: Result<Ids, String>) {
+fn print_core(r: &mut Report, i: usize, mpidr: u64, eff: Option<u8>, boot_core: &Ids, ids: Result<Ids, String>) -> Option<Ids> {
     let eff = eff.map_or(String::from("?"), |e| format!("{e}"));
+    let out = ids.as_ref().ok().copied();
     match ids {
         Ok(ids) => {
             let d = differences(boot_core, &ids);
-            let model = format!("{} r{}p{}", cpu::core_name(ids.midr), (ids.midr >> 20) & 0xf, ids.midr & 0xf);
+            let model = model(&ids);
             let is_boot = ids.mpidr & AFFINITY == boot_core.mpidr & AFFINITY;
             say!(r, "{i:>2}  {mpidr:#011x}  {model:<17}  {eff:>3}  {:<26}  {}{}", cpu::cache_summary(&ids),
                 if d.is_empty() { String::from("-") } else { d.join(",") }, if is_boot { "  (boot core)" } else { "" });
@@ -59,6 +60,49 @@ fn print_core(r: &mut Report, i: usize, mpidr: u64, eff: Option<u8>, boot_core: 
         Err(e) => say!(r, "{i:>2}  {mpidr:#011x}  {e}"),
     }
     r.flush();
+    out
+}
+
+fn model(ids: &Ids) -> String {
+    format!("{} r{}p{}", cpu::core_name(ids.midr), (ids.midr >> 20) & 0xf, ids.midr & 0xf)
+}
+
+/// For the first core of each type other than the boot core's, list every
+/// ID-register field that differs, then that core type's caches.
+fn compare_types(r: &mut Report, boot_core: &Ids, cores: &[Ids]) {
+    let mut seen = alloc::vec![boot_core.midr];
+    for ids in cores {
+        if seen.contains(&ids.midr) {
+            continue;
+        }
+        seen.push(ids.midr);
+        say!(r, "");
+        say!(r, "{} (MPIDR {:#x}) compared with the boot core, a {}:", model(ids), ids.mpidr & AFFINITY, model(boot_core));
+        say!(r, "  (values: boot core -> this core)");
+        let b = boot_core;
+        let registers = [
+            ("PFR0", b.pfr0, ids.pfr0), ("PFR1", b.pfr1, ids.pfr1), ("ISAR0", b.isar0, ids.isar0),
+            ("ISAR1", b.isar1, ids.isar1), ("ISAR2", b.isar2, ids.isar2), ("MMFR0", b.mmfr0, ids.mmfr0),
+            ("MMFR1", b.mmfr1, ids.mmfr1), ("MMFR2", b.mmfr2, ids.mmfr2), ("DFR0", b.dfr0, ids.dfr0),
+            ("ZFR0", b.zfr0, ids.zfr0),
+        ];
+        for (name, x, y) in registers {
+            if x == y {
+                continue;
+            }
+            say!(r, "  ID_AA64{name}_EL1: {x:#018x} -> {y:#018x}");
+            let names = cpu::field_names(name);
+            for (n, field) in names.iter().enumerate() {
+                let (fx, fy) = (cpu::field(x, 4 * n as u32), cpu::field(y, 4 * n as u32));
+                if fx != fy {
+                    say!(r, "    {field:<11} {fx:x} -> {fy:x}  {}", cpu::field_meaning(field));
+                }
+            }
+        }
+        say!(r, "  Caches of this core type:");
+        cpu::report_caches(r, ids);
+        r.flush();
+    }
 }
 
 fn header(r: &mut Report, n: usize) {
@@ -95,6 +139,7 @@ fn with_mp_services(r: &mut Report, mp: &MpServices, boot_core: &Ids, madt: Opti
         }
     };
     header(r, total);
+    let mut read = Vec::new();
     for i in 0..total {
         let Ok(info) = mp.get_processor_info(i) else {
             say!(r, "{i:>2}  (no information)");
@@ -117,8 +162,9 @@ fn with_mp_services(r: &mut Report, mp: &MpServices, boot_core: &Ids, madt: Opti
             }
         };
         let eff = madt.and_then(|m| m.cpus.iter().find(|c| c.mpidr == info.processor_id & AFFINITY)).map(|c| c.efficiency);
-        print_core(r, i, info.processor_id, eff, boot_core, ids);
+        read.extend(print_core(r, i, info.processor_id, eff, boot_core, ids));
     }
+    compare_types(r, boot_core, &read);
 }
 
 // ---------------------------------------------------------------------------
@@ -265,6 +311,7 @@ fn with_psci(r: &mut Report, boot_core: &Ids, madt: Option<&Madt>, tables: &[Tab
     let slot = page.as_ptr() as *mut Slot;
     header(r, m.cpus.len());
     let mut all_off = true;
+    let mut read = Vec::new();
     for (i, core) in m.cpus.iter().enumerate() {
         let ids = if core.mpidr == boot_core.mpidr & AFFINITY {
             Ok(*boot_core)
@@ -277,8 +324,9 @@ fn with_psci(r: &mut Report, boot_core: &Ids, madt: Option<&Madt>, tables: &[Tab
             }
             result
         };
-        print_core(r, i, core.mpidr, Some(core.efficiency), boot_core, ids);
+        read.extend(print_core(r, i, core.mpidr, Some(core.efficiency), boot_core, ids));
     }
+    compare_types(r, boot_core, &read);
     // A core that timed out might still write into the slot later, so the
     // page is only given back when every started core is known to be off.
     if all_off {

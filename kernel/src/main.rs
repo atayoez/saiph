@@ -1,4 +1,4 @@
-//! Orion kernel, first stub: Limine loads it, it finds the console UART in
+//! The Saiph kernel, first stub: Limine loads it, it finds the console UART in
 //! ACPI, maps it, prints where it is running, and powers the machine off.
 
 #![no_std]
@@ -107,7 +107,8 @@ extern "C" fn kmain(spsel_at_entry: u64) -> ! {
     let mut out = uart::Pl011::new(uart_virt);
 
     let el = (mmu::read_current_el() >> 2) & 3;
-    let _ = writeln!(out, "\nOrion kernel: booted by Limine, running at EL{el}");
+    let _ = writeln!(out, "\n{}", include_str!("banner.txt"));
+    let _ = writeln!(out, "  booted by Limine, running at EL{el}");
     let _ = writeln!(out, "  console (ACPI SPCR): PL011 at {uart_phys:#x}, mapped at {uart_virt:#x}");
     let _ = writeln!(out, "  kernel: virtual {:#x} = physical {:#x}", exe.virtual_base, exe.physical_base);
     let _ = writeln!(out, "  RAM direct map offset (HHDM): {:#x}", hhdm.offset);

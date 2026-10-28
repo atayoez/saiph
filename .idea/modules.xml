@@ -2,7 +2,7 @@
 <project version="4">
   <component name="ProjectModuleManager">
     <modules>
-      <module fileurl="file://$PROJECT_DIR$/.idea/orion-os.iml" filepath="$PROJECT_DIR$/.idea/orion-os.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/saiph.iml" filepath="$PROJECT_DIR$/.idea/saiph.iml" />
     </modules>
   </component>
 </project>

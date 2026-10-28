@@ -7,7 +7,7 @@
 //! lower level in AArch64, a lower level in AArch32). Each slot saves x0/x1,
 //! puts its slot number in x0 and jumps to common code, which saves the
 //! remaining registers plus ELR/SPSR/ESR/FAR as a `Frame` on the stack,
-//! calls `orion_exception`, restores everything and returns with `eret`.
+//! calls `saiph_exception`, restores everything and returns with `eret`.
 //! The `_EL1` register names reach the EL2 registers under VHE.
 
 use crate::uart;
@@ -31,17 +31,17 @@ pub struct Frame {
 core::arch::global_asm!(
     ".section .text.vectors, \"ax\"",
     ".balign 2048",
-    ".global orion_vectors",
-    "orion_vectors:",
+    ".global saiph_vectors",
+    "saiph_vectors:",
     ".irp slot, 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15",
     ".balign 128",
     "sub sp, sp, #{size}",
     "stp x0, x1, [sp, #0]",
     "mov x0, #\\slot",
-    "b orion_exception_common",
+    "b saiph_exception_common",
     ".endr",
     "",
-    "orion_exception_common:",
+    "saiph_exception_common:",
     "stp x2, x3, [sp, #16]",
     "stp x4, x5, [sp, #32]",
     "stp x6, x7, [sp, #48]",
@@ -64,7 +64,7 @@ core::arch::global_asm!(
     "mrs x2, FAR_EL1",
     "stp x1, x2, [sp, #264]",
     "mov x1, sp",
-    "bl orion_exception", // (slot, &mut Frame)
+    "bl saiph_exception", // (slot, &mut Frame)
     // The handler may change ELR (to skip an instruction) and SPSR.
     "ldp x1, x2, [sp, #248]",
     "msr ELR_EL1, x1",
@@ -91,14 +91,14 @@ core::arch::global_asm!(
 );
 
 unsafe extern "C" {
-    static orion_vectors: u8;
+    static saiph_vectors: u8;
 }
 
 /// Point VBAR at our vector table. From here on, exceptions are reported.
 pub fn install() {
     // SAFETY: the table is complete and 2 KiB aligned; the ISB makes the
     // new VBAR take effect before the next instruction.
-    unsafe { core::arch::asm!("msr VBAR_EL1, {}", "isb", in(reg) &raw const orion_vectors) };
+    unsafe { core::arch::asm!("msr VBAR_EL1, {}", "isb", in(reg) &raw const saiph_vectors) };
 }
 
 /// Immediate of the boot-time self-test breakpoint (`brk #SELF_TEST`).
@@ -184,7 +184,7 @@ mod alloc_free {
 
 /// Called by the vector code for every exception.
 #[unsafe(no_mangle)]
-extern "C" fn orion_exception(slot: u64, frame: &mut Frame) {
+extern "C" fn saiph_exception(slot: u64, frame: &mut Frame) {
     let ec = (frame.esr >> 26) & 0x3f;
     let synchronous = slot & 3 == 0;
     if synchronous && ec == 0x3c && frame.esr & 0xffff == SELF_TEST as u64 {

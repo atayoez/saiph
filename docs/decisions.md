@@ -10,6 +10,11 @@ board (Radxa Orion O6), never the OS.
   and `-Zbranch-protection=bti,pac-ret`, on the newest nightly, unpinned.
 - **Build** (2026-10-28): plain Cargo. Each crate names its target with
   `forced-target`; `cargo kernel` runs the kernel in QEMU.
+- **Console font** (2026-10-28): Fira Code 6.2, Regular. It is under the SIL
+  Open Font License 1.1 (`kernel/fonts/FiraCode-LICENSE.txt`); that licence
+  must travel with any copy of the font or of a kernel built with it.
+  `kernel/build.rs` renders it into letter images at build time. Ligatures
+  are not drawn: the console draws one image per character.
 - **Users** (2026-10-28): single-user. No root, no user accounts, no logins.
   Programs stay isolated from each other and from the kernel; that protection
   just isn't organised around who is logged in. How programs get their rights

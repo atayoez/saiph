@@ -12,5 +12,7 @@ forced-target = "aarch64-unknown-none-softfloat"
 limine = "0.6"
 frames = { path = "../frames" }
 paging = { path = "../paging" }
-# Pre-rendered glyphs (one brightness byte per pixel) for text on the screen.
-noto-sans-mono-bitmap = { version = "0.3", default-features = false, features = ["regular", "size_16", "size_24", "size_32", "unicode-basic-latin"] }
+
+[build-dependencies]
+# Renders the console font (fonts/) into letter images at build time.
+fontdue = "0.9"

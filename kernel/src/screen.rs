@@ -3,15 +3,13 @@
 //! The firmware has already set up a framebuffer for each display it drives:
 //! a block of memory holding the picture, one 32-bit value per pixel, row
 //! after row. Whatever is written there appears on the monitor. Limine
-//! passes the framebuffers on; we draw characters into them with the
-//! pre-rendered Noto Sans Mono glyphs of the noto-sans-mono-bitmap crate,
-//! which store one brightness byte per pixel.
+//! passes the framebuffers on; we draw characters into them by copying
+//! ready-made letter images that build.rs renders from Fira Code.
 
 use core::cell::UnsafeCell;
 use core::fmt::Write;
 use limine::framebuffer::{FRAMEBUFFER_RGB, Framebuffer};
 use limine::request::FramebufferRequest;
-use noto_sans_mono_bitmap::{FontWeight, RasterHeight, get_raster, get_raster_width};
 
 #[used]
 #[unsafe(link_section = ".requests")]
@@ -21,6 +19,26 @@ static FRAMEBUFFERS: FramebufferRequest = FramebufferRequest::new();
 const TEXT: [u32; 3] = [0xd8, 0xd8, 0xd8];
 
 const MAX_SCREENS: usize = 4;
+
+/// A console font: one image per printable ASCII character (' ' to '~'),
+/// `width` x `height` pixels each, one brightness byte (0-255) per pixel.
+struct Font {
+    width: usize,
+    height: usize,
+    cells: &'static [u8],
+}
+
+// FONTS: the console font at 16, 24 and 32 px row heights (see build.rs).
+include!(concat!(env!("OUT_DIR"), "/fonts.rs"));
+
+impl Font {
+    /// The image of `c`; '?' for characters the font table does not have.
+    fn cell(&self, c: char) -> &'static [u8] {
+        let c = if (' '..='~').contains(&c) { c } else { '?' };
+        let size = self.width * self.height;
+        &self.cells[(c as usize - ' ' as usize) * size..][..size]
+    }
+}
 
 #[derive(Clone, Copy)]
 struct Screen {
@@ -32,9 +50,7 @@ struct Screen {
     pitch: usize,
     /// Bit positions of red, green and blue in a pixel.
     shifts: [u8; 3],
-    font: RasterHeight,
-    char_width: usize,
-    char_height: usize,
+    font: &'static Font,
     cols: usize,
     rows: usize,
     /// Where the next character goes.
@@ -66,13 +82,9 @@ impl Screen {
             return None;
         }
         let (width, height) = (fb.width as usize, fb.height as usize);
-        // Text about 45 rows high on a 1080p monitor, still readable on 4K.
-        let font = match height {
-            2000.. => RasterHeight::Size32,
-            1000.. => RasterHeight::Size24,
-            _ => RasterHeight::Size16,
-        };
-        let (char_width, char_height) = (get_raster_width(FontWeight::Regular, font), font.val());
+        // The largest font that still leaves 45 rows: 24 px on a 1080p
+        // monitor, 32 px on 1440p and 4K.
+        let font = FONTS.iter().rev().find(|f| height / f.height >= 45).unwrap_or(&FONTS[0]);
         Some(Screen {
             base: fb.address() as *mut u8,
             width,
@@ -80,10 +92,8 @@ impl Screen {
             pitch: fb.pitch as usize,
             shifts: [fb.red_mask_shift, fb.green_mask_shift, fb.blue_mask_shift],
             font,
-            char_width,
-            char_height,
-            cols: width / char_width,
-            rows: height / char_height,
+            cols: width / font.width,
+            rows: height / font.height,
             col: 0,
             row: 0,
         })
@@ -106,14 +116,10 @@ impl Screen {
     }
 
     fn draw(&self, c: char) {
-        let glyph = get_raster(c, FontWeight::Regular, self.font)
-            .or_else(|| get_raster('?', FontWeight::Regular, self.font));
-        let Some(glyph) = glyph else { return };
-        let (x0, y0) = (self.col * self.char_width, self.row * self.char_height);
-        for (y, line) in glyph.raster().iter().enumerate() {
-            for (x, &brightness) in line.iter().enumerate() {
-                self.pixel(x0 + x, y0 + y, brightness);
-            }
+        let (w, h) = (self.font.width, self.font.height);
+        let (x0, y0) = (self.col * w, self.row * h);
+        for (i, &brightness) in self.font.cell(c).iter().enumerate() {
+            self.pixel(x0 + i % w, y0 + i / w, brightness);
         }
     }
 
@@ -142,7 +148,7 @@ impl Screen {
 
     /// Move every text row up by one and blank the last.
     fn scroll(&self) {
-        let line = self.char_height * self.pitch;
+        let line = self.font.height * self.pitch;
         let used = self.rows * line;
         // SAFETY: both ranges lie inside the framebuffer; `copy` allows the
         // overlap.
@@ -176,8 +182,8 @@ pub fn describe(out: &mut impl Write) {
     for fb in found {
         let used = screens().iter().flatten().find(|s| s.base == fb.address() as *mut u8);
         let _ = match used {
-            Some(s) => writeln!(out, "  screen: {}x{} framebuffer, {} px text ({}x{} characters)",
-                s.width, s.height, s.char_height, s.cols, s.rows),
+            Some(s) => writeln!(out, "  screen: {}x{} framebuffer, Fira Code in {} px rows ({}x{} characters)",
+                s.width, s.height, s.font.height, s.cols, s.rows),
             None => writeln!(out, "  screen: {}x{} framebuffer at {} bits per pixel, not used (unsupported format)",
                 fb.width, fb.height, fb.bpp),
         };

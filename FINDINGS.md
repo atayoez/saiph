@@ -1,7 +1,7 @@
 # Orion O6: hardware findings
 
 Measured by the hardware probe (a UEFI program, since removed; its source is at the git tag `probe-final`) on the board itself, at EL2, started once from
-systemd-boot with `scripts/board.sh install`. No OS was running, so nothing
+systemd-boot. No OS was running, so nothing
 filtered the values. Section letters (§A–§H) refer to the probe's report.
 
 - **Board:** Radxa Orion O6, CIX P1 (CD8180), 16 GB.
@@ -128,7 +128,8 @@ faults, was a BTI fault (`ESR` `0x36000002`, from `BLR`) at the first indirect
 call. The kernel had been built without branch protection: `cargo` was run
 from outside the repository, so `.cargo/config.toml` was never read and the
 build fell back to rustup's prebuilt `core`. The hardware was right; the
-build is now guarded against it (see `kernel/build.rs`).
+kernel now checks its own code for landing pads before switching BTI and PAC
+on, and `cargo kernel` / `cargo board` always build it with the right flags.
 
 ## What this means for the kernel
 

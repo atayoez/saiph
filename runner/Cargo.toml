@@ -1,0 +1,14 @@
+[package]
+name = "runner"
+version = "0.1.0"
+edition = "2024"
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+# Started by Cargo's runner hook with the kernel it just built: boots it in
+# QEMU or on the board. See src/main.rs and .cargo/config.toml.
+
+[dependencies]
+# Builds the FAT boot image for QEMU.
+hadris-fat = "2.5"

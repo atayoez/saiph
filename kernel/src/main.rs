@@ -143,35 +143,41 @@ extern "C" fn kmain(spsel_at_entry: u64) -> ! {
     let _ = writeln!(out, "  exception vectors installed");
     exceptions::self_test();
 
-    // PAC and BTI: load the key and mark our code guarded, then switch both
-    // on with one SCTLR write. That write must happen here, in kmain, which
-    // never returns: a function that started before PAC was on never signed
-    // its return address, so its own `autiasp` would fail on the way out.
-    let key = protect::load_pac_key();
-    let guarded = protect::guard_kernel_code(hhdm.offset);
-    // SAFETY: EnIA (bit 31) enables PAC with key A. BT (bit 36) makes
-    // `paciasp` stop counting as a landing pad for plain `br` jumps, the
-    // strict BTI mode. BTI checks themselves apply as soon as a page has
-    // its GP bit, which guard_kernel_code just set.
-    unsafe {
-        core::arch::asm!(
-            "mrs {t}, SCTLR_EL1",
-            "orr {t}, {t}, #(1 << 31)",
-            "orr {t}, {t}, #(1 << 36)",
-            "msr SCTLR_EL1, {t}",
-            "isb",
-            t = out(reg) _,
-        )
-    };
-    match key {
-        protect::KeySource::Limine => {
-            let _ = writeln!(out, "  PAC: on (return addresses signed), key from Limine's entropy");
+    // PAC and BTI, if this kernel was compiled for them.
+    let protected = protect::built_with_branch_protection();
+    if protected {
+        // Load the key and mark our code guarded, then switch both
+        // on with one SCTLR write. That write must happen here, in kmain, which
+        // never returns: a function that started before PAC was on never signed
+        // its return address, so its own `autiasp` would fail on the way out.
+        let key = protect::load_pac_key();
+        let guarded = protect::guard_kernel_code(hhdm.offset);
+        // SAFETY: EnIA (bit 31) enables PAC with key A. BT (bit 36) makes
+        // `paciasp` stop counting as a landing pad for plain `br` jumps, the
+        // strict BTI mode. BTI checks themselves apply as soon as a page has
+        // its GP bit, which guard_kernel_code just set.
+        unsafe {
+            core::arch::asm!(
+                "mrs {t}, SCTLR_EL1",
+                "orr {t}, {t}, #(1 << 31)",
+                "orr {t}, {t}, #(1 << 36)",
+                "msr SCTLR_EL1, {t}",
+                "isb",
+                t = out(reg) _,
+            )
+        };
+        match key {
+            protect::KeySource::Limine => {
+                let _ = writeln!(out, "  PAC: on (return addresses signed), key from Limine's entropy");
+            }
+            protect::KeySource::Counter => {
+                let _ = writeln!(out, "  PAC: on (return addresses signed), but WEAK key: Limine sent no entropy");
+            }
         }
-        protect::KeySource::Counter => {
-            let _ = writeln!(out, "  PAC: on (return addresses signed), but WEAK key: Limine sent no entropy");
-        }
+        let _ = writeln!(out, "  BTI: on, {guarded} kernel code pages marked guarded");
+    } else {
+        let _ = writeln!(out, "  PAC and BTI: left off; this kernel was built without branch protection (build it with `cargo kernel` or `cargo board`)");
     }
-    let _ = writeln!(out, "  BTI: on, {guarded} kernel code pages marked guarded");
 
     // Physical memory.
     let Some(mut frames) = memory::init(&mut out, hhdm.offset) else {
@@ -182,7 +188,7 @@ extern "C" fn kmain(spsel_at_entry: u64) -> ! {
 
     // Our own page tables: build, switch, move the console into the device
     // window, then switch off the lower half (reserved for user space).
-    let kernel_tables = match vm::build(&mut frames, hhdm.offset, exe.virtual_base, exe.physical_base, uart_phys) {
+    let kernel_tables = match vm::build(&mut frames, hhdm.offset, exe.virtual_base, exe.physical_base, uart_phys, protected) {
         Ok(t) => t,
         Err(e) => {
             let _ = writeln!(out, "Building page tables failed: {e}; halting.");

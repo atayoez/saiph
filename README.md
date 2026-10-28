@@ -62,10 +62,10 @@ Saiph targets one machine: the [Radxa Orion O6](https://radxa.com/products/orion
 
 ## Try it
 
-Saiph runs in QEMU on any machine, and under KVM on an arm64 Linux host. It needs the newest Rust nightly with `rust-src`, QEMU with the AAVMF firmware, Limine, mtools and dosfstools. The scripts use openSUSE's file locations. On openSUSE Tumbleweed:
+Saiph runs in QEMU on any machine, and under KVM on an arm64 Linux host. It needs the newest Rust nightly with `rust-src`, QEMU with the AAVMF firmware, and Limine; the runner uses openSUSE's file locations for the last two. On openSUSE Tumbleweed:
 
 ```sh
-sudo zypper install qemu-arm qemu-uefi-aarch64 limine mtools dosfstools socat
+sudo zypper install qemu-arm qemu-uefi-aarch64 limine
 rustup toolchain install nightly --component rust-src
 ```
 
@@ -74,17 +74,19 @@ Saiph follows the newest nightly and doesn't pin one: make it your default (`rus
 ```sh
 git clone https://github.com/atayoez/saiph.git
 cd saiph
-cargo kernel                  # QEMU with an emulated CPU: enters at EL2, like the board
-cargo kernel -- kvm           # KVM on an arm64 Linux host: enters at EL1
-cargo kernel -- tcg wx-test   # crash on purpose (also fault-test, pac-test, bti-test)
+cargo kernel               # QEMU with an emulated CPU: enters at EL2, like the board
+cargo kernel kvm           # KVM on an arm64 Linux host: enters at EL1
+cargo kernel tcg wx-test   # crash on purpose (also fault-test, pac-test, bti-test)
 ```
 
-The serial output appears in your terminal; quit early with Ctrl+A, then X. The virtual machine also has a screen. While it runs, `scripts/qemu-screenshot.sh` saves it as a PNG.
+The serial output appears in your terminal; quit early with Ctrl+A, then X. The virtual machine also has a screen; while it runs, `cargo screenshot` saves it as a PNG.
 
-The frame allocator and the page-table builder are plain `no_std` crates with unit tests that run on your computer:
+There are no scripts: `cargo kernel` is an alias for `cargo run -p kernel` with the flags the kernel needs. Cargo builds the kernel, then its runner hook hands the kernel file to [`runner/`](runner), a small Rust program that builds the boot disk image and starts QEMU.
+
+The frame allocator, the page-table builder and the runner have unit tests that run on your computer:
 
 ```sh
-scripts/test-host.sh
+cargo test
 ```
 
 ### On the Orion O6
@@ -92,10 +94,10 @@ scripts/test-host.sh
 If the board runs Linux with systemd-boot, Saiph can boot once without changing the normal boot:
 
 ```sh
-scripts/board.sh kernel
+cargo board
 ```
 
-This copies Limine and the kernel to `\EFI\saiph` on the EFI system partition and arms a one-time boot entry. Saiph shows its output on the screen, then reboots into Linux after 60 seconds. `scripts/board.sh remove` cleans up.
+This copies Limine and the kernel to `\EFI\saiph` on the EFI system partition and arms a one-time boot entry, asking for your password once. Saiph shows its output on the screen, then reboots into Linux after 60 seconds. `cargo board remove` cleans up.
 
 ## How it works
 
@@ -116,7 +118,7 @@ The firmware starts systemd-boot, which starts Limine for one boot; Limine loads
 | [`kernel/`](kernel) | The kernel. `src/main.rs` is the boot sequence; `build.rs` renders the console font |
 | [`frames/`](frames) | The bitmap frame allocator (`no_std`, host-tested) |
 | [`paging/`](paging) | The page-table builder, with W^X built in (`no_std`, host-tested) |
-| [`scripts/`](scripts) | Runners for QEMU, the board and the host tests |
+| [`runner/`](runner) | Boots the kernel Cargo built: in QEMU, or once on the board |
 | [`docs/`](docs) | Decisions, the roadmap and research notes |
 | [`FINDINGS.md`](FINDINGS.md), [`reports/`](reports) | What the hardware probe and Saiph measured on the board |
 

@@ -1,6 +1,9 @@
 [workspace]
 resolver = "3"
-members = ["frames", "kernel", "paging"]
+members = ["frames", "kernel", "paging", "runner"]
+# What a plain `cargo build` or `cargo test` covers. The kernel is built with
+# `cargo kernel`, which adds the flags it needs.
+default-members = ["frames", "paging", "runner"]
 
 [workspace.package]
 authors = ["Atay Özcan <atay@oezcan.me>"]

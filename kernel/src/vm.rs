@@ -92,7 +92,9 @@ pub struct Tables {
 }
 
 /// Build the new tables (does not switch to them yet).
-pub fn build(frames: &mut FrameAllocator<'_>, hhdm: u64, virt_base: u64, phys_base: u64, uart_phys: u64) -> Result<Tables, Error> {
+/// `guard_code`: mark the code pages BTI-guarded (only for a kernel built
+/// with landing pads, see `protect::built_with_branch_protection`).
+pub fn build(frames: &mut FrameAllocator<'_>, hhdm: u64, virt_base: u64, phys_base: u64, uart_phys: u64, guard_code: bool) -> Result<Tables, Error> {
     let mem = KernelTables { frames, hhdm };
     let mut m = Mapper::new(mem).ok_or(MapError::OutOfMemory)?;
     let phys = |va: u64| va - virt_base + phys_base;
@@ -108,7 +110,7 @@ pub fn build(frames: &mut FrameAllocator<'_>, hhdm: u64, virt_base: u64, phys_ba
     };
     for (from, to, kind) in [
         (start, text, Kind::ReadWrite), // Limine requests and responses
-        (text, align_up(text_end), Kind::Code),
+        (text, align_up(text_end), if guard_code { Kind::Code } else { Kind::UnguardedCode }),
         (rodata, align_up(rodata_end), Kind::ReadOnly),
         (data, align_up(end), Kind::ReadWrite),
     ] {

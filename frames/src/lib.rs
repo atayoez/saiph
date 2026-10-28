@@ -3,7 +3,7 @@
 //! The kernel gives it a bitmap and the range of physical memory it covers,
 //! marks the usable regions free, then allocates and frees single frames or
 //! contiguous runs. It never touches the memory it manages, so it can be
-//! unit-tested on a normal computer (`scripts/test-host.sh`).
+//! unit-tested on a normal computer (`cargo test`).
 
 #![no_std]
 

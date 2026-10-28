@@ -67,6 +67,23 @@ pub fn load_pac_key() -> KeySource {
     source
 }
 
+/// Whether this kernel was compiled with branch protection
+/// (`-Zbranch-protection=bti,pac-ret`, which `cargo kernel` and `cargo board`
+/// pass). Then every function that may be called through a pointer begins
+/// with a landing pad: `paciasp` (which counts as one) or a `bti`. A plain
+/// `cargo build`, or an IDE's check, compiles without it; such a kernel must
+/// leave PAC and BTI off, or its first indirect call would fault. So look at
+/// the first instruction of one such function: the console's printer.
+pub fn built_with_branch_protection() -> bool {
+    let function = <crate::console::Console as core::fmt::Write>::write_str as *const () as *const u32;
+    // SAFETY: reads one instruction of our own code, which is mapped readable.
+    let first = unsafe { function.read_volatile() };
+    const PACIASP: u32 = 0xd503_233f;
+    const BTI_C: u32 = 0xd503_245f;
+    const BTI_JC: u32 = 0xd503_24df;
+    matches!(first, PACIASP | BTI_C | BTI_JC)
+}
+
 unsafe extern "C" {
     static __text_start: u8;
     static __text_end: u8;

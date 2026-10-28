@@ -9,7 +9,7 @@
 //! Tables live in physical memory. `TableMemory` abstracts how to get a new
 //! zeroed table and how to reach a table by its physical address, so the
 //! kernel can back it with frames and the direct map, and unit tests with
-//! ordinary heap memory (`scripts/test-host.sh`).
+//! ordinary heap memory (`cargo test`).
 
 #![no_std]
 
@@ -44,6 +44,10 @@ pub const ATTR_DEVICE: u64 = 2;
 pub enum Kind {
     /// Kernel code: read-only, executable, BTI-guarded.
     Code,
+    /// Kernel code compiled without BTI landing pads: read-only and
+    /// executable but not guarded, since on a guarded page its first
+    /// indirect call would fault.
+    UnguardedCode,
     /// Read-only data.
     ReadOnly,
     /// Read-write data.
@@ -61,6 +65,7 @@ impl Kind {
             | UXN
             | match self {
                 Kind::Code => normal | READ_ONLY | GUARDED,
+                Kind::UnguardedCode => normal | READ_ONLY,
                 Kind::ReadOnly => normal | READ_ONLY | PXN,
                 Kind::ReadWrite => normal | PXN,
                 Kind::Device => (ATTR_DEVICE << 2) | PXN,
@@ -306,7 +311,8 @@ mod tests {
     #[test]
     fn kinds_have_the_right_permissions() {
         let mut m = mapper();
-        for (n, kind) in [Kind::Code, Kind::ReadOnly, Kind::ReadWrite, Kind::Device, Kind::Framebuffer].into_iter().enumerate() {
+        let kinds = [Kind::Code, Kind::UnguardedCode, Kind::ReadOnly, Kind::ReadWrite, Kind::Device, Kind::Framebuffer];
+        for (n, kind) in kinds.into_iter().enumerate() {
             let va = KERNEL + n as u64 * PAGE_SIZE;
             m.map(va, 0x1000 * n as u64, PAGE_SIZE, kind).unwrap();
             let d = m.translate(va).unwrap().1;
@@ -316,6 +322,7 @@ mod tests {
             let attr = (d >> 2) & 7;
             match kind {
                 Kind::Code => assert!(d & PXN == 0 && d & GUARDED != 0 && attr == ATTR_NORMAL),
+                Kind::UnguardedCode => assert!(d & PXN == 0 && d & GUARDED == 0 && d & READ_ONLY != 0),
                 Kind::ReadOnly => assert!(d & PXN != 0 && d & READ_ONLY != 0),
                 Kind::ReadWrite => assert!(d & PXN != 0 && d & READ_ONLY == 0),
                 Kind::Device => assert!(d & PXN != 0 && attr == ATTR_DEVICE),

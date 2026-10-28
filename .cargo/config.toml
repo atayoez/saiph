@@ -1,27 +1,35 @@
-# Nightly-only settings for the whole workspace.
-
-[build]
-# The kernel's target, so build-std knows which target to build `core` for.
-# (Without it, nightly Cargo panics when build-std meets per-package-target.)
-target = ["aarch64-unknown-none-softfloat"]
-
-[unstable]
-# Rebuild core/alloc from source, so they are compiled
-# with the same flags as our code (branch protection must match: it is a
-# "target modifier"). Needs the rust-src component.
-build-std = ["core", "compiler_builtins", "alloc"]
-# memcpy, memset & co. for bare metal, from compiler_builtins.
-build-std-features = ["compiler-builtins-mem"]
+# Saiph's commands, all through Cargo:
+#
+#   cargo kernel [tcg|kvm] [words...]   build the kernel and boot it in QEMU;
+#                                       the words become its command line
+#   cargo board [remove]                boot it once on this machine (the O6),
+#                                       or remove it from the ESP again
+#   cargo screenshot [file.png]         save what QEMU's screen shows
+#   cargo test                          the host-side unit tests
+#
+# `cargo kernel` is `cargo run -p kernel` with the flags only the kernel
+# needs. Cargo builds it, then its runner hook (below) hands the kernel file
+# and the remaining words to the `runner` crate in this workspace.
 
 [target.aarch64-unknown-none-softfloat]
-# BTI landing pads and PAC-signed return addresses in all kernel code.
-# Both use instructions that do nothing until the kernel switches the
-# features on, so they are safe to compile in from the start.
-rustflags = ["-Zbranch-protection=bti,pac-ret"]
-# Boots the kernel in QEMU; used by `cargo kernel` (alias below).
-runner = "scripts/run-kernel.sh"
+runner = ["cargo", "run", "-q", "-p", "runner", "--"]
 
 [alias]
-# `cargo kernel [-- tcg|kvm]` builds the kernel and boots it in QEMU via the
-# runner above.
-kernel = ["run", "-p", "kernel", "--target", "aarch64-unknown-none-softfloat"]
+kernel = [
+    "run", "-p", "kernel", "--target", "aarch64-unknown-none-softfloat",
+    # Rebuild core and alloc from source with the kernel's flags: branch
+    # protection is a "target modifier" that all code in one program must
+    # agree on, and rustup's prebuilt core has none. (Needs rust-src.)
+    "-Zbuild-std=core,compiler_builtins,alloc",
+    # memcpy, memset & co. for bare metal, from compiler_builtins.
+    "-Zbuild-std-features=compiler-builtins-mem",
+    # BTI landing pads and PAC-signed return addresses in every function.
+    # Both are instructions that do nothing until the kernel switches the
+    # features on. (Only here, not for every build: an IDE's `cargo check`
+    # then compiles the kernel against the prebuilt core, and such a kernel
+    # leaves PAC and BTI off, see kernel/src/protect.rs.)
+    "--config", "target.aarch64-unknown-none-softfloat.rustflags = ['-Zbranch-protection=bti,pac-ret']",
+    "--",
+]
+board = ["kernel", "board"]
+screenshot = ["kernel", "screenshot"]

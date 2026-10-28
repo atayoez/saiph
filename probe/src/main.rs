@@ -98,7 +98,7 @@ fn main() -> Status {
     r.flush();
 
     r.section("G. All cores");
-    percore::report(&mut r, &ids, madt.as_ref());
+    percore::report(&mut r, &ids, madt.as_ref(), &tables);
     r.flush();
 
     // Last, because it is the only probe that changes CPU memory settings.

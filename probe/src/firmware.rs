@@ -43,24 +43,25 @@ pub fn report_efi_rng(r: &mut Report) {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-enum Conduit {
+pub enum Conduit {
     Smc,
     Hvc,
 }
 
-/// One SMCCC call: function ID in x0, argument in x1; results come back in
-/// x0..x3, and x4..x17 may be overwritten by the firmware.
-fn smccc(conduit: Conduit, function: u32, arg: u64) -> i64 {
+/// One SMCCC call: function ID in x0, arguments in x1..x3; results come
+/// back in x0..x3, and x4..x17 may be overwritten by the firmware.
+pub fn smccc(conduit: Conduit, function: u32, args: [u64; 3]) -> i64 {
     let mut x0 = function as u64;
-    // SAFETY: only read-only version queries are passed in (see callers).
+    // SAFETY: callers pass only version/feature queries and, in percore.rs,
+    // PSCI CPU_ON / AFFINITY_INFO for cores it then waits to see off again.
     unsafe {
         match conduit {
-            Conduit::Smc => core::arch::asm!("smc #0", inout("x0") x0, inout("x1") arg => _,
-                out("x2") _, out("x3") _, out("x4") _, out("x5") _, out("x6") _, out("x7") _,
+            Conduit::Smc => core::arch::asm!("smc #0", inout("x0") x0, inout("x1") args[0] => _,
+                inout("x2") args[1] => _, inout("x3") args[2] => _, out("x4") _, out("x5") _, out("x6") _, out("x7") _,
                 out("x8") _, out("x9") _, out("x10") _, out("x11") _, out("x12") _, out("x13") _,
                 out("x14") _, out("x15") _, out("x16") _, out("x17") _),
-            Conduit::Hvc => core::arch::asm!("hvc #0", inout("x0") x0, inout("x1") arg => _,
-                out("x2") _, out("x3") _, out("x4") _, out("x5") _, out("x6") _, out("x7") _,
+            Conduit::Hvc => core::arch::asm!("hvc #0", inout("x0") x0, inout("x1") args[0] => _,
+                inout("x2") args[1] => _, inout("x3") args[2] => _, out("x4") _, out("x5") _, out("x6") _, out("x7") _,
                 out("x8") _, out("x9") _, out("x10") _, out("x11") _, out("x12") _, out("x13") _,
                 out("x14") _, out("x15") _, out("x16") _, out("x17") _),
         }
@@ -77,37 +78,42 @@ const PSCI_FEATURES: u32 = 0x8400_000a;
 const SMCCC_VERSION: u32 = 0x8000_0000;
 const TRNG_VERSION: u32 = 0x8400_0050;
 
-/// Ask the firmware for its PSCI, SMCCC and TRNG versions.
-pub fn report_smccc(r: &mut Report, ids: &Ids, tables: &[Table]) {
+/// How to reach the firmware's SMCCC services from here, if at all.
+pub fn conduit(ids: &Ids, tables: &[Table]) -> Option<Conduit> {
     let el = (read_sysreg!("CurrentEL") >> 2) & 3;
     // FADT "ARM boot architecture flags" (offset 129): bit 0 = PSCI is
     // available, bit 1 = call it with HVC instead of SMC.
     let flags = find(tables, "FACP").map_or(0, |t| u16_at(t.data, 129));
     let el3 = field(ids.pfr0, 12) != 0;
-    let conduit = if el == 2 {
+    if el == 2 {
         // From EL2 only SMC makes sense, and only if something answers it.
         (el3 || flags & 3 == 1).then_some(Conduit::Smc)
     } else if flags & 1 == 1 {
         Some(if flags & 2 != 0 { Conduit::Hvc } else { Conduit::Smc })
     } else {
         None
-    };
-    let Some(c) = conduit else {
+    }
+}
+
+/// Ask the firmware for its PSCI, SMCCC and TRNG versions.
+pub fn report_smccc(r: &mut Report, ids: &Ids, tables: &[Table]) {
+    let el = (read_sysreg!("CurrentEL") >> 2) & 3;
+    let Some(c) = conduit(ids, tables) else {
         say!(r, "SMCCC: no safe way to call the firmware from EL{el}, skipped");
         return;
     };
     say!(r, "SMCCC calls go through {}", if c == Conduit::Smc { "SMC (to EL3 firmware)" } else { "HVC (to the hypervisor)" });
-    let psci = smccc(c, PSCI_VERSION, 0);
+    let psci = smccc(c, PSCI_VERSION, [0; 3]);
     say!(r, "  PSCI version:  {}", version(psci));
     // The SMCCC spec says to check PSCI_FEATURES(SMCCC_VERSION) first.
-    let smccc_v = if psci >= 0x1_0000 && smccc(c, PSCI_FEATURES, SMCCC_VERSION as u64) >= 0 {
-        smccc(c, SMCCC_VERSION, 0)
+    let smccc_v = if psci >= 0x1_0000 && smccc(c, PSCI_FEATURES, [SMCCC_VERSION as u64, 0, 0]) >= 0 {
+        smccc(c, SMCCC_VERSION, [0; 3])
     } else {
         0x1_0000 // no SMCCC_VERSION call means SMCCC 1.0
     };
     say!(r, "  SMCCC version: {}", version(smccc_v));
     if smccc_v >= 0x1_0001 {
-        say!(r, "  TRNG version:  {}", version(smccc(c, TRNG_VERSION, 0)));
+        say!(r, "  TRNG version:  {}", version(smccc(c, TRNG_VERSION, [0; 3])));
     } else {
         say!(r, "  TRNG version:  not asked (needs SMCCC 1.1 or later)");
     }

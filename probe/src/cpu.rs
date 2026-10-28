@@ -111,7 +111,7 @@ pub fn core_name(midr: u64) -> &'static str {
     match ((midr >> 24) & 0xff, (midr >> 4) & 0xfff) {
         (0x41, 0xd80) => "Cortex-A520",
         (0x41, 0xd81) => "Cortex-A720",
-        (0x00, 0x051) => "QEMU 'max' (emulated)",
+        (0x00, 0x051) => "QEMU max",
         _ => "unknown core",
     }
 }

@@ -117,6 +117,13 @@ pub fn find<'a>(list: &'a [Table], signature: &str) -> Option<&'a Table> {
     list.iter().find(|t| t.signature == signature)
 }
 
+/// One CPU as the MADT describes it.
+pub struct Cpu {
+    pub mpidr: u64,
+    pub efficiency: u8,
+    pub enabled: bool,
+}
+
 /// What the MADT says about the interrupt controller.
 #[derive(Default)]
 pub struct Madt {
@@ -126,8 +133,8 @@ pub struct Madt {
     pub gicr: Vec<(u64, u32)>,
     /// Interrupt Translation Services (ITS) base addresses.
     pub its: Vec<u64>,
-    /// One entry per CPU: MPIDR and power-efficiency class.
-    pub cpus: Vec<(u64, u8)>,
+    /// One entry per CPU.
+    pub cpus: Vec<Cpu>,
 }
 
 /// Parse the MADT (signature "APIC"). After its 44-byte header come
@@ -143,7 +150,9 @@ pub fn madt(list: &[Table]) -> Option<Madt> {
         }
         let e = &d[at..at + len];
         match kind {
-            0x0b => m.cpus.push((u64_at(e, 68), e.get(76).copied().unwrap_or(0))), // GIC CPU interface
+            // GIC CPU interface: flags at 12 (bit 0 = enabled), MPIDR at 68,
+            // power-efficiency class at 76.
+            0x0b => m.cpus.push(Cpu { mpidr: u64_at(e, 68), efficiency: e.get(76).copied().unwrap_or(0), enabled: u32_at(e, 12) & 1 == 1 }),
             0x0c => m.gicd = Some((u64_at(e, 8), e[20])),                          // GIC distributor
             0x0e => m.gicr.push((u64_at(e, 4), u32_at(e, 12))),                    // redistributor region
             0x0f => m.its.push(u64_at(e, 8)),                                      // ITS
@@ -164,12 +173,12 @@ pub fn report_madt(r: &mut Report, m: &Madt) {
     for base in &m.its {
         say!(r, "GIC ITS at {base:#x}");
     }
-    let mut classes: Vec<u8> = m.cpus.iter().map(|c| c.1).collect();
+    let mut classes: Vec<u8> = m.cpus.iter().map(|c| c.efficiency).collect();
     classes.sort_unstable();
     classes.dedup();
     say!(r, "{} CPUs; power-efficiency classes {classes:?}", m.cpus.len());
-    for (mpidr, class) in &m.cpus {
-        say!(r, "  CPU MPIDR {mpidr:#011x}  efficiency class {class}");
+    for c in &m.cpus {
+        say!(r, "  CPU MPIDR {:#011x}  efficiency class {}{}", c.mpidr, c.efficiency, if c.enabled { "" } else { "  (disabled)" });
     }
 }
 

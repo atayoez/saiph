@@ -20,6 +20,9 @@
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)
+# Cargo reads .cargo/config.toml (build-std, branch protection) from the
+# directory it runs in, not from --manifest-path, so build from the root.
+cd "$root"
 esp=/boot/efi
 probe_efi=$root/target/aarch64-unknown-uefi/debug/probe.efi
 probe_entry=orion-probe.conf
@@ -49,7 +52,7 @@ armed_then_reboot() {
 
 case ${1:-} in
   kernel)
-    cargo build --manifest-path "$root/Cargo.toml" -p kernel --target aarch64-unknown-none-softfloat
+    cargo build -p kernel --target aarch64-unknown-none-softfloat
     [[ -f $limine_efi ]] || { echo "missing $limine_efi: pkexec zypper install limine" >&2; exit 1; }
     # Limine reads limine.conf from its own folder. The board's copy adds a
     # command line telling the kernel to reboot 60 s after it finishes.
@@ -69,7 +72,7 @@ case ${1:-} in
     ;;
 
   probe)
-    cargo build --manifest-path "$root/Cargo.toml" -p probe --target aarch64-unknown-uefi
+    cargo build -p probe --target aarch64-unknown-uefi
     # Copy the probe, drop the previous run's report (so `report` can never
     # show a stale one), write the menu entry and arm the one-time boot.
     pkexec sh -c '

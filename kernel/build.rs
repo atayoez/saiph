@@ -13,6 +13,16 @@ const FONT: &str = "fonts/FiraCode-Regular.ttf";
 const ROW_HEIGHTS: [usize; 3] = [16, 24, 32];
 
 fn main() {
+    // The kernel switches BTI and PAC on, so every function in it must have
+    // been compiled with landing pads and signed returns. Without the
+    // repository's .cargo/config.toml (Cargo only reads it when run inside
+    // the repository) the kernel would still build, against the prebuilt
+    // `core`, and then fault on its first indirect call on real hardware.
+    let flags = env::var("CARGO_ENCODED_RUSTFLAGS").unwrap_or_default();
+    if !flags.split('\x1f').any(|f| f == "-Zbranch-protection=bti,pac-ret") {
+        panic!("the kernel must be built with -Zbranch-protection=bti,pac-ret: run cargo inside the repository so .cargo/config.toml applies");
+    }
+
     let dir = env::var("CARGO_MANIFEST_DIR").unwrap();
     println!("cargo:rustc-link-arg=-T{dir}/linker.ld");
     println!("cargo:rerun-if-changed=linker.ld");

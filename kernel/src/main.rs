@@ -7,6 +7,7 @@
 mod acpi;
 mod exceptions;
 mod mmu;
+mod protect;
 mod psci;
 mod uart;
 
@@ -114,11 +115,53 @@ extern "C" fn kmain(spsel_at_entry: u64) -> ! {
     let _ = writeln!(out, "  exception vectors installed");
     exceptions::self_test();
 
+    // PAC and BTI: load the key and mark our code guarded, then switch both
+    // on with one SCTLR write. That write must happen here, in kmain, which
+    // never returns: a function that started before PAC was on never signed
+    // its return address, so its own `autiasp` would fail on the way out.
+    let key = protect::load_pac_key();
+    let guarded = protect::guard_kernel_code(hhdm.offset);
+    // SAFETY: EnIA (bit 31) enables PAC with key A and BT (bit 36) enables
+    // BTI checks on guarded pages, both for this exception level.
+    unsafe {
+        core::arch::asm!(
+            "mrs {t}, SCTLR_EL1",
+            "orr {t}, {t}, #(1 << 31)",
+            "orr {t}, {t}, #(1 << 36)",
+            "msr SCTLR_EL1, {t}",
+            "isb",
+            t = out(reg) _,
+        )
+    };
+    match key {
+        protect::KeySource::Limine => {
+            let _ = writeln!(out, "  PAC: on (return addresses signed), key from Limine's entropy");
+        }
+        protect::KeySource::Counter => {
+            let _ = writeln!(out, "  PAC: on (return addresses signed), but WEAK key: Limine sent no entropy");
+        }
+    }
+    let _ = writeln!(out, "  BTI: on, {guarded} kernel code pages marked guarded");
+
+    // Deliberate faults, on request from the kernel command line.
     let cmdline = CMDLINE.response().map_or("", |c| c.cmdline());
-    if cmdline.split_whitespace().any(|w| w == "fault-test") {
-        let _ = writeln!(out, "  fault-test: reading unmapped address 0x0");
-        // SAFETY: deliberately faults; the exception handler reports it and halts.
-        unsafe { core::ptr::read_volatile(core::ptr::null::<u64>()) };
+    for word in cmdline.split_whitespace() {
+        match word {
+            "fault-test" => {
+                let _ = writeln!(out, "  fault-test: reading unmapped address 0x0");
+                // SAFETY: deliberately faults; the exception handler reports it and halts.
+                unsafe { core::ptr::read_volatile(core::ptr::null::<u64>()) };
+            }
+            "pac-test" => {
+                let _ = writeln!(out, "  pac-test: checking a corrupted signed pointer");
+                protect::pac_test();
+            }
+            "bti-test" => {
+                let _ = writeln!(out, "  bti-test: jumping to a non-landing-pad instruction");
+                protect::bti_test();
+            }
+            _ => {}
+        }
     }
 
     match tables.psci_conduit() {

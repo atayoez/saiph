@@ -24,7 +24,11 @@ SECTIONS
     } :limine_requests
 
     . = ALIGN(4096);
-    .text : { *(.text .text.*) } :text
+    .text : {
+        __text_start = .;
+        *(.text .text.*)
+        __text_end = .;
+    } :text
 
     . = ALIGN(4096);
     .rodata : { *(.rodata .rodata.*) } :rodata

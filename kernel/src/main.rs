@@ -6,6 +6,7 @@
 
 mod acpi;
 mod exceptions;
+mod memory;
 mod mmu;
 mod protect;
 mod psci;
@@ -142,6 +143,13 @@ extern "C" fn kmain(spsel_at_entry: u64) -> ! {
         }
     }
     let _ = writeln!(out, "  BTI: on, {guarded} kernel code pages marked guarded");
+
+    // Physical memory.
+    let Some(mut frames) = memory::init(&mut out, hhdm.offset) else {
+        let _ = writeln!(out, "No usable memory map from Limine; halting.");
+        halt()
+    };
+    memory::self_test(&mut out, &mut frames, hhdm.offset);
 
     // Deliberate faults, on request from the kernel command line.
     let cmdline = CMDLINE.response().map_or("", |c| c.cmdline());

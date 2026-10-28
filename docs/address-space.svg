@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 352" width="800" height="352" role="img" aria-labelledby="title desc">
+  <title id="title">Saiph's virtual address space</title>
+  <desc id="desc">From the top: the kernel image at 0xffff_ffff_8000_0000 (code read and execute, read-only data, data read and write); the device window at 0xffff_c000_0000_0000; all RAM in the direct map at 0xffff_0000_0000_0000, never executable; a range of invalid addresses; and the lower half from 0x0000_0000_0000_0000 to 0x0000_ffff_ffff_ffff, switched off and kept for user programs.</desc>
+  <defs>
+    <pattern id="hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+      <line class="hatch" x1="0" y1="0" x2="0" y2="8"/>
+    </pattern>
+  </defs>
+  <style>
+    text { font-family: ui-sans-serif, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+    .addr { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; fill: #59636e; text-anchor: end; }
+    .tick { stroke: #d1d9e0; }
+    .name { font-size: 13px; font-weight: 600; text-anchor: middle; }
+    .d1 { font-size: 13px; fill: #1f2328; }
+    .d2 { font-size: 12px; fill: #59636e; }
+    .code { fill: #378ADD; stroke: #185FA5; } .code-t { fill: #ffffff; }
+    .rodata { fill: #85B7EB; stroke: #378ADD; } .rodata-t { fill: #042C53; }
+    .data { fill: #B5D4F4; stroke: #378ADD; } .data-t { fill: #042C53; }
+    .mapped { fill: #E6F1FB; stroke: #85B7EB; } .mapped-t { fill: #0C447C; }
+    .hole { fill: url(#hatch); stroke: #d1d9e0; } .hatch { stroke: #d1d9e0; stroke-width: 2; }
+    .off { fill: #f6f8fa; stroke: #d1d9e0; } .off-t { fill: #59636e; }
+    @media (prefers-color-scheme: dark) {
+      .addr, .d2, .off-t { fill: #9198a1; }
+      .tick, .hatch { stroke: #3d444d; }
+      .d1 { fill: #f0f6fc; }
+      .rodata { fill: #185FA5; } .rodata-t { fill: #E6F1FB; }
+      .data { fill: #0C447C; stroke: #185FA5; } .data-t { fill: #E6F1FB; }
+      .mapped { fill: #042C53; stroke: #185FA5; } .mapped-t { fill: #B5D4F4; }
+      .hole { stroke: #3d444d; }
+      .off { fill: #151b23; stroke: #3d444d; }
+    }
+  </style>
+
+  <!-- Kernel image -->
+  <rect class="code" x="208.5" y="10.5" width="183" height="30"/>
+  <text class="name code-t" x="300" y="30">Kernel code</text>
+  <text class="d1" x="408" y="30">read + execute, BTI landing pads only</text>
+  <rect class="rodata" x="208.5" y="40.5" width="183" height="30"/>
+  <text class="name rodata-t" x="300" y="60">Kernel read-only data</text>
+  <text class="d1" x="408" y="60">read only</text>
+  <rect class="data" x="208.5" y="70.5" width="183" height="30"/>
+  <text class="name data-t" x="300" y="90">Kernel data</text>
+  <text class="d1" x="408" y="90">read + write, never execute</text>
+  <line class="tick" x1="198" y1="100.5" x2="208" y2="100.5"/>
+  <text class="addr" x="194" y="104.5">0xffff_ffff_8000_0000</text>
+
+  <!-- Device window -->
+  <rect class="mapped" x="208.5" y="110.5" width="183" height="40"/>
+  <text class="name mapped-t" x="300" y="135">Device registers</text>
+  <text class="d1" x="408" y="127">window base + physical address</text>
+  <text class="d2" x="408" y="143">uncached; today only the serial port</text>
+  <line class="tick" x1="198" y1="150.5" x2="208" y2="150.5"/>
+  <text class="addr" x="194" y="154.5">0xffff_c000_0000_0000</text>
+
+  <!-- Direct map -->
+  <rect class="mapped" x="208.5" y="160.5" width="183" height="66"/>
+  <text class="name mapped-t" x="300" y="198">All RAM (direct map)</text>
+  <text class="d1" x="408" y="186">base + physical address, Limine's offset</text>
+  <text class="d2" x="408" y="203">read + write, never execute;</text>
+  <text class="d2" x="408" y="218">mostly 2 MiB blocks</text>
+  <line class="tick" x1="198" y1="226.5" x2="208" y2="226.5"/>
+  <text class="addr" x="194" y="230.5">0xffff_0000_0000_0000</text>
+
+  <!-- Non-canonical hole -->
+  <rect class="hole" x="208.5" y="226.5" width="183" height="40"/>
+  <text class="d2" x="408" y="250">invalid addresses: the CPU uses 48 bits</text>
+
+  <!-- Lower half -->
+  <rect class="off" x="208.5" y="266.5" width="183" height="60"/>
+  <text class="name off-t" x="300" y="301">Lower half: off</text>
+  <text class="d1" x="408" y="291">any access faults</text>
+  <text class="d2" x="408" y="308">kept for user programs</text>
+  <line class="tick" x1="198" y1="266.5" x2="208" y2="266.5"/>
+  <text class="addr" x="194" y="270.5">0x0000_ffff_ffff_ffff</text>
+  <line class="tick" x1="198" y1="326.5" x2="208" y2="326.5"/>
+  <text class="addr" x="194" y="330.5">0x0000_0000_0000_0000</text>
+
+  <text class="d2" x="208" y="348">Not to scale. Gaps between blocks are unmapped.</text>
+</svg>

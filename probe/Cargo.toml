@@ -4,6 +4,9 @@ cargo-features = ["per-package-target"]
 name = "probe"
 version = "0.1.0"
 edition = "2024"
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
 # Always built as a UEFI application (per-package-target, nightly Cargo).
 forced-target = "aarch64-unknown-uefi"
 

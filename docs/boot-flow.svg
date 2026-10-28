@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 206" width="800" height="206" role="img" aria-labelledby="title desc">
+  <title id="title">How Saiph boots</title>
+  <desc id="desc">The UEFI firmware starts systemd-boot, which starts Limine once, which loads the Saiph kernel. The kernel then sets up its consoles, exception handling, PAC and BTI, the frame allocator and its own page tables, and finally powers off or reboots.</desc>
+  <style>
+    text { font-family: ui-sans-serif, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; text-anchor: middle; }
+    .label { font-size: 12px; fill: #59636e; text-anchor: start; }
+    .box { fill: #E6F1FB; stroke: #85B7EB; }
+    .main { fill: #378ADD; stroke: #185FA5; }
+    .bt { font-size: 15px; font-weight: 600; fill: #0C447C; }
+    .bt2 { font-size: 13.5px; font-weight: 600; fill: #0C447C; }
+    .bs { font-size: 12px; fill: #185FA5; }
+    .mt { font-size: 15px; font-weight: 600; fill: #ffffff; }
+    .ms { font-size: 12px; fill: #E6F1FB; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; }
+    .arrow { stroke: #85B7EB; stroke-width: 2; }
+    .head { fill: #85B7EB; }
+    @media (prefers-color-scheme: dark) {
+      .label { fill: #9198a1; }
+      .box { fill: #0C447C; stroke: #185FA5; }
+      .bt, .bt2 { fill: #E6F1FB; }
+      .bs { fill: #B5D4F4; }
+      .arrow { stroke: #378ADD; }
+      .head { fill: #378ADD; }
+    }
+  </style>
+
+  <text class="label" x="0" y="13">Boot chain</text>
+  <rect class="box" x="0.5" y="22.5" width="175" height="63" rx="8"/>
+  <text class="bt" x="88" y="50">UEFI firmware</text>
+  <text class="bs" x="88" y="70">Radxa BIOS, at EL2</text>
+  <line class="arrow" x1="180" y1="54" x2="199" y2="54"/>
+  <polygon class="head" points="207,54 198,49 198,59"/>
+
+  <rect class="box" x="208.5" y="22.5" width="175" height="63" rx="8"/>
+  <text class="bt" x="296" y="50">systemd-boot</text>
+  <text class="bs" x="296" y="70">one-time boot entry</text>
+  <line class="arrow" x1="388" y1="54" x2="407" y2="54"/>
+  <polygon class="head" points="415,54 406,49 406,59"/>
+
+  <rect class="box" x="416.5" y="22.5" width="175" height="63" rx="8"/>
+  <text class="bt" x="504" y="50">Limine</text>
+  <text class="bs mono" x="504" y="70">\EFI\saiph\limine.efi</text>
+  <line class="arrow" x1="596" y1="54" x2="615" y2="54"/>
+  <polygon class="head" points="623,54 614,49 614,59"/>
+
+  <rect class="main" x="624.5" y="22.5" width="175" height="63" rx="8"/>
+  <text class="mt" x="712" y="50">Saiph kernel</text>
+  <text class="ms" x="712" y="70">higher half, EL2 + VHE</text>
+
+  <text class="label" x="0" y="129">Inside the kernel, in order</text>
+  <rect class="box" x="0.5" y="138.5" width="119" height="63" rx="8"/>
+  <text class="bt2" x="60" y="166">Consoles</text>
+  <text class="bs" x="60" y="186">screen + serial</text>
+  <polygon class="head" points="134,170 125,165 125,175"/>
+
+  <rect class="box" x="136.5" y="138.5" width="119" height="63" rx="8"/>
+  <text class="bt2" x="196" y="166">Exceptions</text>
+  <text class="bs" x="196" y="186">fault reports</text>
+  <polygon class="head" points="270,170 261,165 261,175"/>
+
+  <rect class="box" x="272.5" y="138.5" width="119" height="63" rx="8"/>
+  <text class="bt2" x="332" y="166">PAC + BTI</text>
+  <text class="bs" x="332" y="186">signed returns</text>
+  <polygon class="head" points="406,170 397,165 397,175"/>
+
+  <rect class="box" x="408.5" y="138.5" width="119" height="63" rx="8"/>
+  <text class="bt2" x="468" y="166">Frame allocator</text>
+  <text class="bs" x="468" y="186">one bit per 4 KiB</text>
+  <polygon class="head" points="542,170 533,165 533,175"/>
+
+  <rect class="box" x="544.5" y="138.5" width="119" height="63" rx="8"/>
+  <text class="bt2" x="604" y="166">Page tables</text>
+  <text class="bs" x="604" y="186">its own, W^X</text>
+  <polygon class="head" points="678,170 669,165 669,175"/>
+
+  <rect class="main" x="680.5" y="138.5" width="119" height="63" rx="8"/>
+  <text class="mt" x="740" y="166">Power off</text>
+  <text class="ms" x="740" y="186">or reboot (PSCI)</text>
+</svg>

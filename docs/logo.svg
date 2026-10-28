@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <title>Saiph</title>
+  <g stroke="#85B7EB" stroke-width="4" stroke-linecap="round">
+    <line x1="34" y1="34" x2="48" y2="48"/>
+    <line x1="94" y1="34" x2="80" y2="48"/>
+    <line x1="34" y1="94" x2="48" y2="80"/>
+    <line x1="94" y1="94" x2="80" y2="80"/>
+  </g>
+  <path d="M64 4 C67 44 84 61 124 64 C84 67 67 84 64 124 C61 84 44 67 4 64 C44 61 61 44 64 4 Z" fill="#378ADD"/>
+  <circle cx="64" cy="64" r="8" fill="#E6F1FB"/>
+</svg>

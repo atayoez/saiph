@@ -9,6 +9,11 @@ use limine::request::MemmapRequest;
 #[unsafe(link_section = ".requests")]
 static MEMMAP: MemmapRequest = MemmapRequest::new();
 
+/// Limine's memory map (empty if Limine sent none).
+pub fn entries() -> &'static [&'static Entry] {
+    MEMMAP.response().map_or(&[], |r| r.entries())
+}
+
 fn type_name(t: u64) -> &'static str {
     match t {
         memmap::MEMMAP_USABLE => "usable",

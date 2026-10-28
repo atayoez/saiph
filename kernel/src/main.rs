@@ -11,6 +11,7 @@ mod mmu;
 mod protect;
 mod psci;
 mod uart;
+mod vm;
 
 use core::fmt::Write;
 use limine::request::{ExecutableAddressRequest, ExecutableCmdlineRequest, HhdmRequest, RsdpRequest};
@@ -151,6 +152,22 @@ extern "C" fn kmain(spsel_at_entry: u64) -> ! {
     };
     memory::self_test(&mut out, &mut frames, hhdm.offset);
 
+    // Our own page tables: build, switch, move the console into the device
+    // window, then switch off the lower half (reserved for user space).
+    let kernel_tables = match vm::build(&mut frames, hhdm.offset, exe.virtual_base, exe.physical_base, uart_phys) {
+        Ok(t) => t,
+        Err(e) => {
+            let _ = writeln!(out, "Building page tables failed: {e:?}; halting.");
+            halt()
+        }
+    };
+    let _ = writeln!(out, "  page tables built: {} tables, {} pages + {} blocks of 2 MiB, {} W^X violations",
+        kernel_tables.tables, kernel_tables.pages, kernel_tables.blocks, kernel_tables.wx_violations);
+    vm::switch_to(kernel_tables.root);
+    out = uart::Pl011::new(kernel_tables.uart);
+    vm::disable_lower_half();
+    let _ = writeln!(out, "  running on our own page tables; console now at {:#x}; lower half off", kernel_tables.uart);
+
     // Deliberate faults, on request from the kernel command line.
     let cmdline = CMDLINE.response().map_or("", |c| c.cmdline());
     for word in cmdline.split_whitespace() {
@@ -167,6 +184,13 @@ extern "C" fn kmain(spsel_at_entry: u64) -> ! {
             "bti-test" => {
                 let _ = writeln!(out, "  bti-test: jumping to a non-landing-pad instruction");
                 protect::bti_test();
+            }
+            "wx-test" => {
+                let target = kmain as *const () as *mut u32;
+                let _ = writeln!(out, "  wx-test: writing to kernel code at {target:p}");
+                // SAFETY: deliberately faults (code is mapped read-only); the
+                // exception handler reports it and halts.
+                unsafe { target.write_volatile(0) };
             }
             _ => {}
         }

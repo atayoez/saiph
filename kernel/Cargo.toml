@@ -11,3 +11,4 @@ forced-target = "aarch64-unknown-none-softfloat"
 [dependencies]
 limine = "0.6"
 frames = { path = "../frames" }
+paging = { path = "../paging" }

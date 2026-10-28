@@ -1,0 +1,142 @@
+Orion probe
+Running at EL2
+
+== A. CPU features (boot core) ==
+MIDR_EL1  = 0x00000000410fd811  Cortex-A720 r0p1
+MPIDR_EL1 = 0x0000000081000a00  core address 0.0.10.0
+ID_AA64PFR0_EL1  = 0x1201111123111111
+ID_AA64PFR1_EL1  = 0x0000000000010321
+ID_AA64ISAR0_EL1 = 0x0221111110212120
+ID_AA64ISAR1_EL1 = 0x0111111100211002
+ID_AA64ISAR2_EL1 = 0x0000000001005102
+ID_AA64MMFR0_EL1 = 0x2100022200101122
+ID_AA64MMFR1_EL1 = 0x1001111010312122
+ID_AA64MMFR2_EL1 = 0x1221011110101011
+ID_AA64DFR0_EL1  = 0x100f11f310305719
+ID_AA64ZFR0_EL1  = 0x0000110100110021
+  BTI:                 present (BT=1)
+  MTE:                 full tag checking plus asymmetric mode (MTE3) (MTE=3)
+  PAuth:               QARMA3, PAuth2 + FPAC + FPACCOMBINE (APA=0 API=0 APA3=5)
+  GCS (shadow stack):  absent (GCS=0)
+  Physical addresses:  40 bits (PARange=2)
+  Page sizes:          4K=yes 16K=yes 64K=yes (TGran4=0 TGran16=1 TGran64=0)
+  LPA2 (52-bit, 4K):   absent
+  VHE:                 present (VH=1)
+  Nested virt:         absent (NV=0)
+  EL2 / EL3 exist:     present / present
+  RAS:                 RAS v1.1 (RAS=2 RAS_frac=0)
+  MPAM:                v1.1 (MPAM=1 MPAM_frac=1)
+  SVE:                 SVE2
+  SME:                 absent (SME=0)
+  RNDR (random insn):  absent (RNDR=0)
+  LSE atomics:         present (Atomic=2)
+  GIC CPU interface:   GICv4.1 (GIC=3)
+  PMU version code:    7 (1=PMUv3, 4..9 = PMUv3.1..v3.9)
+  SPE (profiling):     present (PMSVer=3)
+  TRBE (trace buffer): present (TraceBuffer=1)
+
+== B. Caches (boot core) ==
+CLIDR_EL1 = 0x00000054c3000123
+  L1 data           64K   4-way    256 sets  64 B lines  (CCSIDR=0xff0000001a)
+  L1 instruction    64K   4-way    256 sets  64 B lines  (CCSIDR=0xff0000001a)
+  L2 unified       512K   8-way   1024 sets  64 B lines  (CCSIDR=0x3ff0000003a)
+  L3 unified        12M  12-way  16384 sets  64 B lines  (CCSIDR=0x3fff0000005a)
+
+== C. ACPI tables ==
+RSDP at 0x455770018: signature 'RSD PTR ', OEM 'CIXTEK', revision 2
+sig   address         length  rev  OEM     OEM table  checksum  saved as
+XSDT  0x045577fe98     148    1  CIXTEK  SKY1EDK2   ok        acpi\xsdt.dat
+FACP  0x045577fc98     276    6  CIXTEK  SKY1EDK2   ok        acpi\facp.dat
+SSDT  0x0455777518   16149    2  RADXA   ORIONO6    ok        acpi\ssdt.dat
+CSRT  0x045577fa98     140    0  CIXTEK  SKY1EDK2   ok        acpi\csrt.dat
+DBG2  0x045577fb98      92    0  CIXTEK  SKY1EDK2   ok        acpi\dbg2.dat
+IORT  0x045577bd18    2688    5  CIXTEK  SKY1EDK2   ok        acpi\iort.dat
+PCCT  0x045577f518     138    2  CIXTEK  SKY1EDK2   ok        acpi\pcct.dat
+SDEI  0x045577f898      36    1  CIXTEK  SKY1EDK2   ok        acpi\sdei.dat
+SPCR  0x045577fa18      80    2  CIXTEK  SKY1EDK2   ok        acpi\spcr.dat
+APIC  0x045577ea98    1064    5  CIXTEK  SKY1EDK2   ok        acpi\apic.dat
+SSDT  0x045577ce18    5120    2  CIXTEK  SKY1EDK2   ok        acpi\ssdt1.dat
+PPTT  0x045577f618     396    2  CIXTEK  SKY1EDK2   ok        acpi\pptt.dat
+FPDT  0x045577fe18      68    1  INTEL   EDK2       ok        acpi\fpdt.dat
+MCFG  0x045577f118     124    1  CIXTEK  SKY1EDK2   ok        acpi\mcfg.dat
+GTDT  0x045577e998     132    3  CIXTEK  SKY1EDK2   ok        acpi\gtdt.dat
+DSDT  0x0455750018   72588    2  CIXTEK  SKY1EDK2   ok        acpi\dsdt.dat
+GIC distributor (GICD) at 0xe010000, version stated by firmware: 4
+GIC redistributors (GICR) at 0xe090000, 3072 KiB
+GIC ITS at 0xe050000
+12 CPUs; power-efficiency classes [0]
+  CPU MPIDR 0x000000a00  efficiency class 0
+  CPU MPIDR 0x000000b00  efficiency class 0
+  CPU MPIDR 0x000000000  efficiency class 0
+  CPU MPIDR 0x000000100  efficiency class 0
+  CPU MPIDR 0x000000200  efficiency class 0
+  CPU MPIDR 0x000000300  efficiency class 0
+  CPU MPIDR 0x000000400  efficiency class 0
+  CPU MPIDR 0x000000500  efficiency class 0
+  CPU MPIDR 0x000000600  efficiency class 0
+  CPU MPIDR 0x000000700  efficiency class 0
+  CPU MPIDR 0x000000800  efficiency class 0
+  CPU MPIDR 0x000000900  efficiency class 0
+Debug UART (DBG2): Arm PL011 at 0x40e0000
+SMMUv3 unit (IORT) at 0xb1b0000
+
+== D. Interrupt controller and SMMU ==
+GICD_IIDR  = 0x0402143b  Arm GIC-700 r2p1
+GICD_PIDR2 = 0x0000004b  architecture GICv4
+GICD_TYPER = 0x007f0410  interrupts up to 543, LPIs yes, direct virtual injection yes
+GICD_TYPER2 = 0x00000083
+GICR_IIDR  = 0x0402143b  Arm GIC-700 r2p1
+GICR_TYPER = 0x050000e7  (low half)  virtual LPIs yes, RVPEID 1
+GITS_IIDR  = 0x0402143b  Arm GIC-700 r2p1  (ITS at 0xe050000)
+GITS_TYPER = 0x0001ef33  (low half)  virtual interrupts yes
+  => Arm GIC-700 implementing GICv4.1
+SMMU at 0xb1b0000:
+  SMMU_AIDR = 0x00000002  SMMUv3.2
+  SMMU_IIDR = 0x4871243b  Arm MMU-700 r1p2
+  SMMU_IDR0 = 0x080f36bf  stage-1 translation yes, stage-2 translation yes
+  SMMU_IDR5 = 0x04000472  output addresses up to 40 bits
+  SMMU_CR0  = 0x00000000  left disabled by the firmware
+  SMMU_GBPA = 0x00000000  while disabled, device DMA is passed through
+
+== E. Entropy ==
+RNDR instruction: absent
+EFI RNG protocol: present, algorithms [ALGORITHM_RAW], 16 random bytes: 4e02ed85ffab577b038534c81d66d72b
+SMCCC calls go through SMC (to EL3 firmware)
+  PSCI version:  1.1
+  SMCCC version: 1.2
+  TRNG version:  not supported (-1)
+
+== F. Firmware and network boot ==
+Firmware: EDK II revision 0x3, UEFI 2.70
+SMBIOS BIOS:   vendor 'Radxa Computer (Shenzhen) Co., Ltd.', version '1.3.1', date '2026-07-16T11:55:04+00:00'
+SMBIOS system: 'Radxa Computer (Shenzhen) Co., Ltd.' 'Radxa Orion O6'
+SMBIOS board:  'Radxa Computer (Shenzhen) Co., Ltd.' 'Radxa Orion O6' version '1.0'
+Boot menu entries (4):
+  Boot0003: openSUSE Boot Manager
+  Boot0000: UiApp
+  Boot0001: UEFI CT1000P3SSD8 2304E6A2662B 1
+  Boot0002: UEFI Shell
+Network cards started by the firmware: 2; PXE: 0; HTTP: 2
+
+== G. All cores ==
+The firmware offers no MP services protocol; starting the cores through PSCI instead.
+12 cores. '-' = same ID registers as the boot core.
+ #  MPIDR        core               eff  caches                      differs
+ 0  0x000000a00  Cortex-A720 r0p1     0  L1 64K/64K, L2 512K, L3 12M  -  (boot core)
+ 1  0x000000b00  Cortex-A720 r0p1     0  L1 64K/64K, L2 512K, L3 12M  -
+ 2  0x000000000  Cortex-A520 r0p1     0  L1 32K/32K, L2 12M          MIDR,MMFR1,DFR0,CLIDR,caches
+ 3  0x000000100  Cortex-A520 r0p1     0  L1 32K/32K, L2 12M          MIDR,MMFR1,DFR0,CLIDR,caches
+ 4  0x000000200  Cortex-A520 r0p1     0  L1 32K/32K, L2 12M          MIDR,MMFR1,DFR0,CLIDR,caches
+ 5  0x000000300  Cortex-A520 r0p1     0  L1 32K/32K, L2 12M          MIDR,MMFR1,DFR0,CLIDR,caches
+ 6  0x000000400  Cortex-A720 r0p1     0  L1 64K/64K, L2 512K, L3 12M  -
+ 7  0x000000500  Cortex-A720 r0p1     0  L1 64K/64K, L2 512K, L3 12M  -
+ 8  0x000000600  Cortex-A720 r0p1     0  L1 64K/64K, L2 512K, L3 12M  -
+ 9  0x000000700  Cortex-A720 r0p1     0  L1 64K/64K, L2 512K, L3 12M  -
+10  0x000000800  Cortex-A720 r0p1     0  L1 64K/64K, L2 512K, L3 12M  -
+11  0x000000900  Cortex-A720 r0p1     0  L1 64K/64K, L2 512K, L3 12M  -
+
+== H. MTE tag storage ==
+Test page 0x44ec00000: level-2 block descriptor 0x000000044ec0070d
+Using MAIR slot 7 for Tagged memory; SCTLR_EL2.ATA on for the test
+Wrote tags 0xa and 0x5, read back 0xa and 0x5; everything restored
+  => MTE tag storage works at EL2

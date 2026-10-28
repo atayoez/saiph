@@ -19,7 +19,7 @@ A learning and research OS for one Armv9 board, built in small steps. UEFI and L
 </div>
 
 > [!NOTE]
-> Saiph is at the very beginning. It boots, sets up its consoles, exception handling, memory protection and page tables, then powers off. There is no scheduler, no user space and no driver beyond the console yet. It runs in QEMU; its first boot on the real board is next.
+> Saiph is at the very beginning. It boots, sets up its consoles, exception handling, memory protection and page tables, then powers off or restarts. There is no scheduler, no user space and no driver beyond the console yet. It runs in QEMU and on the real Orion O6.
 
 ## What works
 
@@ -36,7 +36,7 @@ A learning and research OS for one Armv9 board, built in small steps. UEFI and L
 
 - [x] Boot, consoles, exceptions, PAC and BTI
 - [x] Frame allocator and its own page tables
-- [ ] First boot on the Orion O6
+- [x] First boot on the Orion O6
 - [ ] Kernel heap
 - [ ] Timer and interrupts (GIC-700)
 - [ ] All 12 cores

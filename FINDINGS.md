@@ -42,6 +42,10 @@ filtered the values. Section letters (§A–§H) refer to the probe's report.
 | Starting other cores | **no EFI MP services**; PSCI `CPU_ON`/`CPU_OFF` works (all 11 started and stopped) | §G |
 | Network boot | stack disabled in the BIOS by choice; NICs still load, no PXE, no boot entries | §F |
 | UEFI Shell | **present** in the boot menu | §F |
+| Generic timer | **1 GHz** (`CNTFRQ_EL0`) | Saiph boot |
+| Screen (UEFI GOP via Limine) | 3440×1440, 32 bits per pixel, mapped as **device memory** (uncached) | Saiph boot |
+| Limine's EL2 hand-off | `HCR_EL2` `0x488000002`: **E2H 1, TGE 1** (a VHE host) | Saiph boot |
+| PSCI `SYSTEM_RESET` | **works** | Saiph boot |
 
 ## Details
 
@@ -101,6 +105,30 @@ entry is the main console.
 
 XSDT, FACP, DSDT, SSDT ×2 (one from Radxa, `ORIONO6`), APIC (MADT), IORT, PPTT,
 GTDT, MCFG, SPCR, DBG2, PCCT, CSRT, SDEI, FPDT. All checksums are valid.
+
+### Saiph's first boot (2026-10-28)
+
+The kernel itself, booted by Limine through a one-time systemd-boot entry,
+ran to the end on the fourth try: PAC and BTI on at EL2, frame allocator,
+its own page tables, then a reset through PSCI `SYSTEM_RESET` 60 s later.
+Values it printed on the way:
+
+- **EL2 as Limine leaves it:** `HCR_EL2` `0x488000002` (E2H 1, TGE 1),
+  `SCTLR_EL2` `0x30d0199d`, `TCR_EL2` `0x2b5103510` (40-bit physical
+  addresses, 48-bit virtual, 4K granule, write-back cached and inner-shareable
+  table walks). Under QEMU the only difference is the physical-address size.
+- **Kernel load address:** physical `0x44c2x0000`, above 4 GiB; it moves a
+  little from boot to boot.
+- **Screen:** 3440×1440, mapped as device memory, so writes reach the monitor
+  without any cache maintenance. (In QEMU, ramfb is mapped write-back.)
+
+The first three runs stopped after the exception self-test. The fault,
+decoded from the last-resort squares Saiph draws when even its fault report
+faults, was a BTI fault (`ESR` `0x36000002`, from `BLR`) at the first indirect
+call. The kernel had been built without branch protection: `cargo` was run
+from outside the repository, so `.cargo/config.toml` was never read and the
+build fell back to rustup's prebuilt `core`. The hardware was right; the
+build is now guarded against it (see `kernel/build.rs`).
 
 ## What this means for the kernel
 

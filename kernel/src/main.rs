@@ -143,25 +143,12 @@ extern "C" fn kmain(spsel_at_entry: u64) -> ! {
     let _ = writeln!(out, "  exception vectors installed");
     exceptions::self_test();
 
-    // Bring-up diagnostics: on the board the kernel stopped somewhere
-    // between the self-test and "PAC: on", so say how Limine set up EL2
-    // and announce each step.
-    if el == 2 {
-        let (hcr, sctlr, tcr): (u64, u64, u64);
-        // SAFETY: reading system registers at EL2 has no side effects.
-        unsafe { core::arch::asm!("mrs {}, HCR_EL2", "mrs {}, SCTLR_EL1", "mrs {}, TCR_EL1", out(reg) hcr, out(reg) sctlr, out(reg) tcr) };
-        let _ = writeln!(out, "  EL2: HCR {hcr:#x} (E2H {}, TGE {}), SCTLR {sctlr:#x}, TCR {tcr:#x}", hcr >> 34 & 1, hcr >> 27 & 1);
-    }
-
     // PAC and BTI: load the key and mark our code guarded, then switch both
     // on with one SCTLR write. That write must happen here, in kmain, which
     // never returns: a function that started before PAC was on never signed
     // its return address, so its own `autiasp` would fail on the way out.
-    let _ = writeln!(out, "  PAC: loading key A");
     let key = protect::load_pac_key();
-    let _ = writeln!(out, "  BTI: marking the kernel's code pages guarded");
     let guarded = protect::guard_kernel_code(hhdm.offset);
-    let _ = writeln!(out, "  switching PAC and BTI on");
     // SAFETY: EnIA (bit 31) enables PAC with key A. BT (bit 36) makes
     // `paciasp` stop counting as a landing pad for plain `br` jumps, the
     // strict BTI mode. BTI checks themselves apply as soon as a page has

@@ -251,3 +251,58 @@ pub fn write_str(s: &str) {
         }
     }
 }
+
+/// Last resort, for a fault while a fault report is being printed: draw `a`
+/// and `b` as two rows of 64 squares at the bottom of the first screen (each
+/// row starts with a red marker, then the bits from the most significant:
+/// bright = 1, dim = 0), then stop. It calls no other function, not even for
+/// a loop or a pixel write, because a function call may be exactly what
+/// keeps faulting.
+pub fn show_bits_and_halt(a: u64, b: u64) -> ! {
+    // SAFETY: reads the screen table in place, without a call; see `Screens`.
+    let first = unsafe { &(*(&raw const SCREENS.0 as *const [Option<Screen>; MAX_SCREENS]))[0] };
+    if let Some(s) = first {
+        let [r, g, bl] = s.shifts;
+        let (bright, dim, red) = (0xffu32 << r | 0xff << g | 0xff << bl, 0x50u32 << r | 0x50 << g | 0x50 << bl, 0xffu32 << r);
+        // 65 squares (marker + 64 bits) take about 82 square widths.
+        let size = s.width / 140;
+        let step = size + size / 4 + 1;
+        let mut row = 0;
+        while row < 2 {
+            let value = if row == 0 { a } else { b };
+            let top = s.height - (2 - row) * step - size;
+            let mut bit = 0;
+            while bit < 65 {
+                let colour = if bit == 0 { red } else if value >> (64 - bit) & 1 == 1 { bright } else { dim };
+                let left = size + bit * step;
+                let mut y = top;
+                while y < top + size {
+                    let line = s.base as usize + y * s.pitch;
+                    let mut x = left;
+                    while x < left + size {
+                        // SAFETY: inside the framebuffer: the squares fit its
+                        // width and the bottom rows are within its height.
+                        unsafe { core::arch::asm!("str {c:w}, [{p}]", c = in(reg) colour, p = in(reg) line + x * 4) };
+                        x += 1;
+                    }
+                    // Write the row's pixels back to RAM (see `to_ram`).
+                    let mut c = (line + left * 4) & !31;
+                    while c < line + (left + size) * 4 {
+                        // SAFETY: cleaning a mapped address only writes its data to RAM.
+                        unsafe { core::arch::asm!("dc cvac, {}", in(reg) c) };
+                        c += 32;
+                    }
+                    y += 1;
+                }
+                bit += 1;
+            }
+            row += 1;
+        }
+        // SAFETY: waits until the writes have reached RAM.
+        unsafe { core::arch::asm!("dsb sy") };
+    }
+    loop {
+        // SAFETY: wfe has no effect besides waiting.
+        unsafe { core::arch::asm!("wfe") };
+    }
+}

@@ -12,12 +12,19 @@
 
 use crate::console::Console;
 use core::fmt::Write;
-use core::sync::atomic::{AtomicBool, Ordering};
+use core::sync::atomic::{AtomicU8, Ordering};
 
-/// Set while the handler is printing. A fault inside the printing code would
+/// 1 while the handler is printing. A fault inside the printing code would
 /// otherwise start another report, which faults again, forever, without a
-/// single line reaching the screen; with this the second fault just halts.
-static REPORTING: AtomicBool = AtomicBool::new(false);
+/// single line reaching the screen. A second fault instead shows its ESR and
+/// ELR as squares on the screen (`screen::show_bits_and_halt`) and stops.
+static REPORTING: AtomicU8 = AtomicU8::new(0);
+
+/// `nested-test`: pretend a report is being printed, so the next fault
+/// takes the last-resort path.
+pub fn pretend_reporting() {
+    REPORTING.store(1, Ordering::Relaxed);
+}
 
 /// The interrupted code's registers, as the vector code saves them.
 #[repr(C)]
@@ -191,15 +198,23 @@ mod alloc_free {
 /// Called by the vector code for every exception.
 #[unsafe(no_mangle)]
 extern "C" fn saiph_exception(slot: u64, frame: &mut Frame) {
-    if REPORTING.swap(true, Ordering::Relaxed) {
-        crate::halt(); // a fault while printing a report
+    // Set the flag, noting whether it was already set. In assembly, as even
+    // a function call may be what faults.
+    let nested: u32;
+    // SAFETY: a one-byte flag at a valid address; one core, so no other writer.
+    unsafe {
+        core::arch::asm!("ldrb {n:w}, [{f}]", "mov {one:w}, #1", "strb {one:w}, [{f}]",
+            f = in(reg) &REPORTING, n = out(reg) nested, one = out(reg) _)
+    };
+    if nested != 0 {
+        crate::screen::show_bits_and_halt(frame.esr, frame.elr);
     }
     let ec = (frame.esr >> 26) & 0x3f;
     let synchronous = slot & 3 == 0;
     if synchronous && ec == 0x3c && frame.esr & 0xffff == SELF_TEST as u64 {
         let _ = writeln!(Console, "  exception self-test: brk #{SELF_TEST:#x} at {:#x} handled, resuming", frame.elr);
         frame.elr += 4; // continue after the brk instruction
-        REPORTING.store(false, Ordering::Relaxed);
+        REPORTING.store(0, Ordering::Relaxed);
         return;
     }
 

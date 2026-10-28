@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["frames", "kernel", "probe"]
+members = ["frames", "kernel", "paging", "probe"]
 
 # compiler_builtins (rebuilt from source by build-std) must be optimized even
 # in debug builds: unoptimized, it keeps references to 128-bit float maths

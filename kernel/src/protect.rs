@@ -5,7 +5,8 @@
 //! (`autiasp`), and every possible indirect-branch target starts with a
 //! `bti` landing pad. Both are hint instructions that do nothing until:
 //! - PAC: an instruction key A is loaded and SCTLR.EnIA is set;
-//! - BTI: SCTLR.BT is set *and* the code pages are marked guarded (GP bit).
+//! - BTI: the code pages are marked guarded (GP bit). SCTLR.BT then also
+//!   stops `paciasp` from counting as a landing pad for plain `br` jumps.
 //!
 //! The SCTLR write itself happens in `kmain` (see there for why).
 

@@ -5,6 +5,12 @@
 //! after row. Whatever is written there appears on the monitor. Limine
 //! passes the framebuffers on; we draw characters into them by copying
 //! ready-made letter images that build.rs renders from Fira Code.
+//!
+//! The firmware decides how the framebuffer is cached, and Limine maps it
+//! that way. If it is ordinary cached memory, new pixels first land in the
+//! CPU's caches, and the display engine, which reads RAM, keeps showing the
+//! old picture until they happen to be written back. So after drawing we
+//! clean the touched cache lines out to RAM (`dc cvac`).
 
 use core::cell::UnsafeCell;
 use core::fmt::Write;
@@ -102,6 +108,7 @@ impl Screen {
     fn clear(&self) {
         // SAFETY: the framebuffer is height * pitch bytes long.
         unsafe { core::ptr::write_bytes(self.base, 0, self.height * self.pitch) };
+        to_ram(self.base as usize, self.height * self.pitch);
     }
 
     /// Set pixel (x, y) to the text colour at `brightness` (0 = black).
@@ -120,6 +127,9 @@ impl Screen {
         let (x0, y0) = (self.col * w, self.row * h);
         for (i, &brightness) in self.font.cell(c).iter().enumerate() {
             self.pixel(x0 + i % w, y0 + i / w, brightness);
+        }
+        for y in y0..y0 + h {
+            to_ram(self.base as usize + y * self.pitch + x0 * 4, w * 4);
         }
     }
 
@@ -156,6 +166,43 @@ impl Screen {
             core::ptr::copy(self.base.add(line), self.base, used - line);
             core::ptr::write_bytes(self.base.add(used - line), 0, line);
         }
+        to_ram(self.base as usize, used);
+    }
+}
+
+/// Write the cache lines covering [start, start + len) back to RAM ("clean
+/// to the point of coherency"). Harmless if the memory is not cached.
+fn to_ram(start: usize, len: usize) {
+    let ctr: u64;
+    // SAFETY: reading CTR_EL0 has no side effects.
+    unsafe { core::arch::asm!("mrs {}, CTR_EL0", out(reg) ctr) };
+    // CTR_EL0.DminLine: log2 of the smallest data cache line, in words.
+    let line = 4 << ((ctr >> 16) & 0xf);
+    let mut a = start & !(line - 1);
+    while a < start + len {
+        // SAFETY: cleaning a mapped address only writes its data to RAM.
+        unsafe { core::arch::asm!("dc cvac, {}", in(reg) a) };
+        a += line;
+    }
+    // SAFETY: waits until the writes have reached RAM.
+    unsafe { core::arch::asm!("dsb sy") };
+}
+
+/// How Limine mapped the framebuffers: the memory type in MAIR slot 1.
+fn memory_type() -> &'static str {
+    let mair: u64;
+    // SAFETY: reading MAIR has no side effects.
+    unsafe { core::arch::asm!("mrs {}, MAIR_EL1", out(reg) mair) };
+    let attr = (mair >> 8) & 0xff;
+    if attr & 0xf0 == 0 {
+        return "device memory";
+    }
+    // Normal memory: the low four bits are the inner (CPU-side) caching.
+    match attr & 0x0f {
+        0b0100 => "uncached",
+        0b1000..=0b1011 => "cached (write-through)",
+        0b1100..=0b1111 => "cached (write-back)",
+        _ => "cached (transient)",
     }
 }
 
@@ -182,8 +229,8 @@ pub fn describe(out: &mut impl Write) {
     for fb in found {
         let used = screens().iter().flatten().find(|s| s.base == fb.address() as *mut u8);
         let _ = match used {
-            Some(s) => writeln!(out, "  screen: {}x{} framebuffer, Fira Code in {} px rows ({}x{} characters)",
-                s.width, s.height, s.font.height, s.cols, s.rows),
+            Some(s) => writeln!(out, "  screen: {}x{} framebuffer, {}, Fira Code in {} px rows ({}x{} characters)",
+                s.width, s.height, memory_type(), s.font.height, s.cols, s.rows),
             None => writeln!(out, "  screen: {}x{} framebuffer at {} bits per pixel, not used (unsupported format)",
                 fb.width, fb.height, fb.bpp),
         };

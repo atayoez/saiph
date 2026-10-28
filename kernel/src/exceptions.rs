@@ -12,6 +12,12 @@
 
 use crate::console::Console;
 use core::fmt::Write;
+use core::sync::atomic::{AtomicBool, Ordering};
+
+/// Set while the handler is printing. A fault inside the printing code would
+/// otherwise start another report, which faults again, forever, without a
+/// single line reaching the screen; with this the second fault just halts.
+static REPORTING: AtomicBool = AtomicBool::new(false);
 
 /// The interrupted code's registers, as the vector code saves them.
 #[repr(C)]
@@ -185,11 +191,15 @@ mod alloc_free {
 /// Called by the vector code for every exception.
 #[unsafe(no_mangle)]
 extern "C" fn saiph_exception(slot: u64, frame: &mut Frame) {
+    if REPORTING.swap(true, Ordering::Relaxed) {
+        crate::halt(); // a fault while printing a report
+    }
     let ec = (frame.esr >> 26) & 0x3f;
     let synchronous = slot & 3 == 0;
     if synchronous && ec == 0x3c && frame.esr & 0xffff == SELF_TEST as u64 {
         let _ = writeln!(Console, "  exception self-test: brk #{SELF_TEST:#x} at {:#x} handled, resuming", frame.elr);
         frame.elr += 4; // continue after the brk instruction
+        REPORTING.store(false, Ordering::Relaxed);
         return;
     }
 

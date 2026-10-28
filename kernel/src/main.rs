@@ -149,8 +149,10 @@ extern "C" fn kmain(spsel_at_entry: u64) -> ! {
     // its return address, so its own `autiasp` would fail on the way out.
     let key = protect::load_pac_key();
     let guarded = protect::guard_kernel_code(hhdm.offset);
-    // SAFETY: EnIA (bit 31) enables PAC with key A and BT (bit 36) enables
-    // BTI checks on guarded pages, both for this exception level.
+    // SAFETY: EnIA (bit 31) enables PAC with key A. BT (bit 36) makes
+    // `paciasp` stop counting as a landing pad for plain `br` jumps, the
+    // strict BTI mode. BTI checks themselves apply as soon as a page has
+    // its GP bit, which guard_kernel_code just set.
     unsafe {
         core::arch::asm!(
             "mrs {t}, SCTLR_EL1",
@@ -237,13 +239,16 @@ extern "C" fn kmain(spsel_at_entry: u64) -> ! {
         Some(secs) => {
             let _ = writeln!(out, "Rebooting in {secs} seconds.");
             timer::wait_seconds(secs);
-            psci::system_reset(conduit)
+            let error = psci::system_reset(conduit);
+            let _ = writeln!(out, "The firmware refused to restart (PSCI error {error}); press the reset button.");
         }
         None => {
             let _ = writeln!(out, "Powering off.");
-            psci::system_off(conduit)
+            let error = psci::system_off(conduit);
+            let _ = writeln!(out, "The firmware refused to power off (PSCI error {error}); halting.");
         }
     }
+    halt()
 }
 
 #[panic_handler]

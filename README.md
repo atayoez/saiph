@@ -47,7 +47,7 @@ The long-term plan, with research on every part of the board, is in [docs/roadma
 
 ## The board
 
-Saiph targets one machine: the [Radxa Orion O6](https://radxa.com/products/orion/o6/). Before the kernel was written, a small UEFI program in [`probe/`](probe) measured what the hardware actually does. It only reads: it never writes to device registers, flash or EFI variables. [FINDINGS.md](FINDINGS.md) has every answer with its evidence.
+Saiph targets one machine: the [Radxa Orion O6](https://radxa.com/products/orion/o6/). Before the kernel was written, a small read-only UEFI program measured what the hardware actually does; its source is kept at the [`probe-final`](https://github.com/atayoez/saiph/tree/probe-final) tag. [FINDINGS.md](FINDINGS.md) has every answer with its evidence, plus what Saiph's own first boot showed.
 
 | | |
 |---|---|
@@ -95,7 +95,7 @@ If the board runs Linux with systemd-boot, Saiph can boot once without changing 
 scripts/board.sh kernel
 ```
 
-This copies Limine and the kernel to `\EFI\saiph` on the EFI system partition and arms a one-time boot entry. Saiph shows its output on the screen, then reboots into Linux after 60 seconds. `scripts/board.sh probe` and `scripts/board.sh report` run the hardware probe the same way, and `scripts/board.sh remove` cleans up.
+This copies Limine and the kernel to `\EFI\saiph` on the EFI system partition and arms a one-time boot entry. Saiph shows its output on the screen, then reboots into Linux after 60 seconds. `scripts/board.sh remove` cleans up.
 
 ## How it works
 
@@ -116,10 +116,9 @@ The firmware starts systemd-boot, which starts Limine for one boot; Limine loads
 | [`kernel/`](kernel) | The kernel. `src/main.rs` is the boot sequence; `build.rs` renders the console font |
 | [`frames/`](frames) | The bitmap frame allocator (`no_std`, host-tested) |
 | [`paging/`](paging) | The page-table builder, with W^X built in (`no_std`, host-tested) |
-| [`probe/`](probe) | The read-only UEFI hardware probe |
 | [`scripts/`](scripts) | Runners for QEMU, the board and the host tests |
 | [`docs/`](docs) | Decisions, the roadmap and research notes |
-| [`FINDINGS.md`](FINDINGS.md), [`reports/`](reports) | What the probe measured on the board |
+| [`FINDINGS.md`](FINDINGS.md), [`reports/`](reports) | What the hardware probe and Saiph measured on the board |
 
 ## Support
 
@@ -133,7 +132,7 @@ Questions and ideas are welcome in [Issues](https://github.com/atayoez/saiph/iss
 
 - [Limine](https://github.com/limine-bootloader/limine) boots Saiph, and the [limine](https://crates.io/crates/limine) crate describes its boot protocol.
 - The console font is [Fira Code](https://github.com/tonsky/FiraCode) by The Fira Code Project Authors, rendered at build time with [fontdue](https://github.com/mooman219/fontdue).
-- The probe is built on [uefi-rs](https://github.com/rust-osdev/uefi-rs).
+- The hardware probe was built on [uefi-rs](https://github.com/rust-osdev/uefi-rs).
 - The roadmap draws on [seL4](https://sel4.systems), [Redox](https://www.redox-os.org), [Asterinas](https://asterinas.github.io), [Hubris](https://hubris.oxide.computer) and [Managarm](https://managarm.org), and the hardware knowledge on documentation, schematics and ACPI sources published by Radxa and CIX.
 
 ## License

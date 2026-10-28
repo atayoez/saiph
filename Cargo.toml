@@ -1,15 +1,8 @@
 [workspace]
 resolver = "3"
-members = ["frames", "kernel", "paging", "probe"]
+members = ["frames", "kernel", "paging"]
 
 [workspace.package]
 authors = ["Atay Özcan <atay@oezcan.me>"]
 license = "GPL-3.0-or-later"
 repository = "https://github.com/atayoez/saiph"
-
-# compiler_builtins (rebuilt from source by build-std) must be optimized even
-# in debug builds: unoptimized, it keeps references to 128-bit float maths
-# functions (fmal, rintl) that the UEFI target does not provide. Rust's own
-# prebuilt copies are optimized too.
-[profile.dev.package.compiler_builtins]
-opt-level = 3

@@ -1,6 +1,6 @@
 # Orion O6: hardware findings
 
-Measured by the probe (`probe/`) on the board itself, at EL2, started once from
+Measured by the hardware probe (a UEFI program, since removed; its source is at the git tag `probe-final`) on the board itself, at EL2, started once from
 systemd-boot with `scripts/board.sh install`. No OS was running, so nothing
 filtered the values. Section letters (§A–§H) refer to the probe's report.
 

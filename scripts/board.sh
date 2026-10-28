@@ -1,14 +1,11 @@
 #!/usr/bin/env bash
-# Run Saiph or the hardware probe on the O6 itself (bare metal) via systemd-boot.
+# Run Saiph on the O6 itself (bare metal) via systemd-boot.
 #
 #   scripts/board.sh kernel    build Saiph, copy it with Limine to the ESP and boot
 #                              it once on the next boot. It shows its output on
 #                              the screen, then reboots into Linux after 60 s.
-#   scripts/board.sh probe     build the probe, copy it to the ESP, run it once
-#   scripts/board.sh report    show the probe's bare-metal report; commit it and
-#                              the ACPI dump to reports/board-<time the probe ran>/
-#   scripts/board.sh remove    delete Saiph, the probe and their menu entries
-#                              from the ESP
+#   scripts/board.sh remove    delete Saiph and its menu entry from the ESP (and
+#                              the old hardware probe's, if it is still there)
 #
 # The ESP (/boot/efi) is root-only, so each subcommand does its ESP work in
 # a single pkexec call (one password dialog). The build runs as you.
@@ -24,7 +21,8 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 # directory it runs in, not from --manifest-path, so build from the root.
 cd "$root"
 esp=/boot/efi
-probe_efi=$root/target/aarch64-unknown-uefi/debug/probe.efi
+# Where the hardware probe installed itself (the probe is no longer in the
+# repository; see the git tag probe-final). `remove` cleans it up.
 probe_entry=orion-probe.conf
 kernel_elf=$root/target/aarch64-unknown-none-softfloat/debug/kernel
 kernel_entry=saiph.conf
@@ -36,19 +34,6 @@ efi_string() {
   [[ -e $1 ]] && tail -c +5 "$1" | iconv -f UTF-16LE -t UTF-8 | tr -d '\0'
 }
 
-# Check that the one-time boot points at entry $1 (named $2), then offer
-# to reboot.
-armed_then_reboot() {
-  if [[ $(efi_string "$oneshot_var") == "$1" ]]; then
-    echo "Armed: the next boot runs $2 once, then shows the systemd-boot menu."
-  else
-    echo "Warning: LoaderEntryOneShot is not set to $1; the next boot may skip $2." >&2
-  fi
-  read -r -p "Reboot now? [y/N] " answer
-  if [[ $answer == [yY]* ]]; then
-    systemctl reboot
-  fi
-}
 
 case ${1:-} in
   kernel)
@@ -68,48 +53,14 @@ case ${1:-} in
       printf "title   Saiph\nefi     /EFI/saiph/limine.efi\n" > "$1/loader/entries/$5"
       bootctl set-oneshot "$5"
     ' sh "$esp" "$limine_efi" "$conf" "$kernel_elf" "$kernel_entry"
-    armed_then_reboot "$kernel_entry" Saiph
-    ;;
-
-  probe)
-    cargo build -p probe --target aarch64-unknown-uefi
-    # Copy the probe, drop the previous run's report (so `report` can never
-    # show a stale one), write the menu entry and arm the one-time boot.
-    pkexec sh -c '
-      set -e
-      mkdir -p "$1/EFI/orion-probe"
-      cp "$2" "$1/EFI/orion-probe/probe.efi"
-      rm -rf "$1/EFI/orion-probe/report.txt" "$1/EFI/orion-probe/acpi"
-      printf "title   Orion probe\nefi     /EFI/orion-probe/probe.efi\n" > "$1/loader/entries/$3"
-      bootctl set-oneshot "$3"
-    ' sh "$esp" "$probe_efi" "$probe_entry"
-    armed_then_reboot "$probe_entry" "the probe"
-    ;;
-
-  report)
-    # One root call: pack report.txt and the acpi folder into a tar stream;
-    # tar keeps each file's time, so report.txt's time says when the probe ran.
-    tmp=$(mktemp -d)
-    trap 'rm -rf "$tmp"' EXIT
-    if ! pkexec sh -c 'cd "$1/EFI/orion-probe" && [ -f report.txt ] && tar -cf - report.txt $(ls -d acpi 2>/dev/null)' sh "$esp" | tar -xf - -C "$tmp"; then
-      echo "No report on the ESP. Run 'scripts/board.sh probe' and reboot first." >&2
-      exit 1
-    fi
-    cat "$tmp/report.txt"
-
-    stamp=$(date -r "$tmp/report.txt" +%Y-%m-%d-%H%M)
-    dest=$root/reports/board-$stamp
-    if [[ -e $dest ]]; then
-      echo
-      echo "Already saved as ${dest#"$root"/}/"
+    if [[ $(efi_string "$oneshot_var") == "$kernel_entry" ]]; then
+      echo "Armed: the next boot runs Saiph once, then shows the systemd-boot menu."
     else
-      mkdir -p "$root/reports"
-      cp -r "$tmp" "$dest"
-      chmod -R u+rw,go+r "$dest"
-      git -C "$root" add -- "$dest"
-      git -C "$root" commit -q -m "Add bare-metal probe report from $(date -r "$tmp/report.txt" '+%Y-%m-%d %H:%M')" -- "$dest"
-      echo
-      echo "Saved and committed as ${dest#"$root"/}/"
+      echo "Warning: LoaderEntryOneShot is not set to $kernel_entry; the next boot may skip Saiph." >&2
+    fi
+    read -r -p "Reboot now? [y/N] " answer
+    if [[ $answer == [yY]* ]]; then
+      systemctl reboot
     fi
     ;;
 
@@ -122,11 +73,11 @@ case ${1:-} in
     if [[ $oneshot == "$probe_entry" || $oneshot == "$kernel_entry" ]]; then
       pkexec bootctl set-oneshot @default
     fi
-    echo "Removed Saiph, the probe and their menu entries from the ESP."
+    echo "Removed Saiph (and the old probe, if it was there) from the ESP."
     ;;
 
   *)
-    echo "usage: $0 kernel | probe | report | remove" >&2
+    echo "usage: $0 kernel | remove" >&2
     exit 2
     ;;
 esac

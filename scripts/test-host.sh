@@ -11,4 +11,4 @@
 set -euo pipefail
 root=$(cd "$(dirname "$0")/.." && pwd)
 cd /
-exec cargo test --manifest-path "$root/Cargo.toml" --workspace --exclude kernel --exclude probe "$@"
+exec cargo test --manifest-path "$root/Cargo.toml" --workspace --exclude kernel "$@"

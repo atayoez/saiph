@@ -11,7 +11,7 @@
 //!
 //! The lower half (TTBR0) is switched off afterwards; it is for user space.
 
-use crate::memory;
+use crate::{memory, screen};
 use frames::FrameAllocator;
 use limine::memmap;
 use paging::{Kind, MapError, Mapper, PAGE_SIZE, TableMemory};
@@ -58,6 +58,29 @@ fn align_up(x: u64) -> u64 {
     x.div_ceil(PAGE_SIZE) * PAGE_SIZE
 }
 
+/// Why `build` failed.
+#[derive(Debug)]
+pub enum Error {
+    Map(MapError),
+    /// The memory map has more regions than `build` has room for.
+    TooManyRegions,
+}
+
+impl core::fmt::Display for Error {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            Error::Map(e) => write!(f, "{e:?}"),
+            Error::TooManyRegions => write!(f, "the memory map has too many regions"),
+        }
+    }
+}
+
+impl From<MapError> for Error {
+    fn from(e: MapError) -> Self {
+        Error::Map(e)
+    }
+}
+
 /// What `build` produced.
 pub struct Tables {
     pub root: u64,
@@ -69,7 +92,7 @@ pub struct Tables {
 }
 
 /// Build the new tables (does not switch to them yet).
-pub fn build(frames: &mut FrameAllocator<'_>, hhdm: u64, virt_base: u64, phys_base: u64, uart_phys: u64) -> Result<Tables, MapError> {
+pub fn build(frames: &mut FrameAllocator<'_>, hhdm: u64, virt_base: u64, phys_base: u64, uart_phys: u64) -> Result<Tables, Error> {
     let mem = KernelTables { frames, hhdm };
     let mut m = Mapper::new(mem).ok_or(MapError::OutOfMemory)?;
     let phys = |va: u64| va - virt_base + phys_base;
@@ -94,13 +117,12 @@ pub fn build(frames: &mut FrameAllocator<'_>, hhdm: u64, virt_base: u64, phys_ba
         }
     }
 
-    // The direct map: the same memory types Limine maps there. Ranges are
-    // rounded out to whole pages, sorted, and merged when they touch and
+    // The direct map: the same memory types Limine maps there, plus the
+    // screens in use (in case the memory map does not list them). Ranges
+    // are rounded out to whole pages, sorted, and merged when they touch and
     // have the same kind (so 2 MiB blocks can span region boundaries). A
     // page claimed by two ranges keeps the kind of the one mapped first.
-    let mut ranges: [(u64, u64, Kind); 128] = [(0, 0, Kind::ReadOnly); 128];
-    let mut n = 0;
-    for e in memory::entries() {
+    let memory = memory::entries().iter().filter_map(|e| {
         let kind = match e.type_ {
             memmap::MEMMAP_USABLE
             | memmap::MEMMAP_BOOTLOADER_RECLAIMABLE
@@ -109,12 +131,18 @@ pub fn build(frames: &mut FrameAllocator<'_>, hhdm: u64, virt_base: u64, phys_ba
             | memmap::MEMMAP_MAPPED_RESERVED => Kind::ReadWrite,
             memmap::MEMMAP_EXECUTABLE_AND_MODULES => Kind::ReadOnly,
             memmap::MEMMAP_FRAMEBUFFER => Kind::Framebuffer,
-            _ => continue,
+            _ => return None,
         };
+        Some((e.base, e.length, kind))
+    });
+    let screens = screen::regions(hhdm).map(|(base, len)| (base, len, Kind::Framebuffer));
+    let mut ranges: [(u64, u64, Kind); 256] = [(0, 0, Kind::ReadOnly); 256];
+    let mut n = 0;
+    for (base, len, kind) in memory.chain(screens) {
         if n == ranges.len() {
-            break;
+            return Err(Error::TooManyRegions);
         }
-        ranges[n] = (align_down(e.base), align_up(e.base + e.length), kind);
+        ranges[n] = (align_down(base), align_up(base + len), kind);
         n += 1;
     }
     let ranges = &mut ranges[..n];

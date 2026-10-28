@@ -9,22 +9,22 @@ const UARTDR: u64 = 0x00;
 const UARTFR: u64 = 0x18;
 const TXFF: u32 = 1 << 5;
 
-/// The mapped console, for the panic handler.
+/// Where the console PL011 is mapped (0 = not yet).
 static CONSOLE: AtomicU64 = AtomicU64::new(0);
 
 pub struct Pl011 {
     base: u64,
 }
 
-impl Pl011 {
-    /// `base` must be a mapped PL011 register block.
-    pub fn new(base: u64) -> Self {
-        CONSOLE.store(base, Ordering::Relaxed);
-        Pl011 { base }
-    }
+/// Use the PL011 mapped at `base` as the console from now on. `base` must
+/// be a mapped PL011 register block.
+pub fn set_console(base: u64) {
+    CONSOLE.store(base, Ordering::Relaxed);
+}
 
+impl Pl011 {
     fn put(&mut self, byte: u8) {
-        // SAFETY: `base` is a mapped PL011 (see `new`).
+        // SAFETY: `base` is a mapped PL011 (see `set_console`).
         unsafe {
             while core::ptr::read_volatile((self.base + UARTFR) as *const u32) & TXFF != 0 {}
             core::ptr::write_volatile((self.base + UARTDR) as *mut u32, byte as u32);

@@ -10,7 +10,7 @@
 //! calls `saiph_exception`, restores everything and returns with `eret`.
 //! The `_EL1` register names reach the EL2 registers under VHE.
 
-use crate::uart;
+use crate::console::Console;
 use core::fmt::Write;
 
 /// The interrupted code's registers, as the vector code saves them.
@@ -188,34 +188,31 @@ extern "C" fn saiph_exception(slot: u64, frame: &mut Frame) {
     let ec = (frame.esr >> 26) & 0x3f;
     let synchronous = slot & 3 == 0;
     if synchronous && ec == 0x3c && frame.esr & 0xffff == SELF_TEST as u64 {
-        if let Some(mut out) = uart::console() {
-            let _ = writeln!(out, "  exception self-test: brk #{SELF_TEST:#x} at {:#x} handled, resuming", frame.elr);
-        }
+        let _ = writeln!(Console, "  exception self-test: brk #{SELF_TEST:#x} at {:#x} handled, resuming", frame.elr);
         frame.elr += 4; // continue after the brk instruction
         return;
     }
 
-    if let Some(mut out) = uart::console() {
-        let (kind, from) = origin(slot);
-        let _ = writeln!(out, "\n*** unexpected {kind} from {from}");
-        let _ = writeln!(out, "    cause: {} (ESR={:#x}, class {ec:#04x})", class(ec), frame.esr);
-        if synchronous && matches!(ec, 0x20 | 0x21 | 0x24 | 0x25) {
-            let write = ec >= 0x24 && frame.esr & (1 << 6) != 0; // WnR bit
-            let _ = writeln!(out, "    {}, {} address {:#x}", fault_status(frame.esr & 0x3f),
-                if ec <= 0x21 { "fetching" } else if write { "writing" } else { "reading" }, frame.far);
-        }
-        let _ = writeln!(out, "    at ELR={:#x}  SPSR={:#x}", frame.elr, frame.spsr);
-        for row in 0..8 {
-            let _ = write!(out, "   ");
-            for col in 0..4 {
-                let n = row * 4 + col;
-                if n < 31 {
-                    let _ = write!(out, " x{n:<2}={:#018x}", frame.x[n]);
-                }
-            }
-            let _ = writeln!(out);
-        }
-        let _ = writeln!(out, "    halting.");
+    let mut out = Console;
+    let (kind, from) = origin(slot);
+    let _ = writeln!(out, "\n*** unexpected {kind} from {from}");
+    let _ = writeln!(out, "    cause: {} (ESR={:#x}, class {ec:#04x})", class(ec), frame.esr);
+    if synchronous && matches!(ec, 0x20 | 0x21 | 0x24 | 0x25) {
+        let write = ec >= 0x24 && frame.esr & (1 << 6) != 0; // WnR bit
+        let _ = writeln!(out, "    {}, {} address {:#x}", fault_status(frame.esr & 0x3f),
+            if ec <= 0x21 { "fetching" } else if write { "writing" } else { "reading" }, frame.far);
     }
+    let _ = writeln!(out, "    at ELR={:#x}  SPSR={:#x}", frame.elr, frame.spsr);
+    for row in 0..8 {
+        let _ = write!(out, "   ");
+        for col in 0..4 {
+            let n = row * 4 + col;
+            if n < 31 {
+                let _ = write!(out, " x{n:<2}={:#018x}", frame.x[n]);
+            }
+        }
+        let _ = writeln!(out);
+    }
+    let _ = writeln!(out, "    halting.");
     crate::halt()
 }

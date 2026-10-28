@@ -9,15 +9,27 @@ pub enum Conduit {
 }
 
 const SYSTEM_OFF: u64 = 0x8400_0008;
+const SYSTEM_RESET: u64 = 0x8400_0009;
 
 /// Power the machine off. Does not return; if the firmware refuses, the
 /// core stops instead.
 pub fn system_off(conduit: Conduit) -> ! {
-    // SAFETY: SYSTEM_OFF takes no arguments and does not return on success.
+    call_no_return(conduit, SYSTEM_OFF)
+}
+
+/// Restart the machine (a cold reset: the firmware starts from scratch).
+/// Does not return; if the firmware refuses, the core stops instead.
+pub fn system_reset(conduit: Conduit) -> ! {
+    call_no_return(conduit, SYSTEM_RESET)
+}
+
+fn call_no_return(conduit: Conduit, function: u64) -> ! {
+    // SAFETY: SYSTEM_OFF and SYSTEM_RESET take no arguments and do not
+    // return on success.
     unsafe {
         match conduit {
-            Conduit::Smc => core::arch::asm!("smc #0", inout("x0") SYSTEM_OFF => _, out("x1") _, out("x2") _, out("x3") _),
-            Conduit::Hvc => core::arch::asm!("hvc #0", inout("x0") SYSTEM_OFF => _, out("x1") _, out("x2") _, out("x3") _),
+            Conduit::Smc => core::arch::asm!("smc #0", inout("x0") function => _, out("x1") _, out("x2") _, out("x3") _),
+            Conduit::Hvc => core::arch::asm!("hvc #0", inout("x0") function => _, out("x1") _, out("x2") _, out("x3") _),
         }
     }
     loop {

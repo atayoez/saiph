@@ -1,18 +1,24 @@
-//! The Saiph kernel, first stub: Limine loads it, it finds the console UART in
-//! ACPI, maps it, prints where it is running, and powers the machine off.
+//! The Saiph kernel, early days: Limine loads it; it sets up its consoles
+//! (screen and serial), exceptions, PAC and BTI, physical memory and its own
+//! page tables, then powers the machine off, or reboots it after a wait
+//! when the command line says `reboot-after=<seconds>` (as on the board).
 
 #![no_std]
 #![no_main]
 
 mod acpi;
+mod console;
 mod exceptions;
 mod memory;
 mod mmu;
 mod protect;
 mod psci;
+mod screen;
+mod timer;
 mod uart;
 mod vm;
 
+use console::Console;
 use core::fmt::Write;
 use limine::request::{ExecutableAddressRequest, ExecutableCmdlineRequest, HhdmRequest, RsdpRequest};
 use limine::{BaseRevision, RequestsEndMarker, RequestsStartMarker};
@@ -89,27 +95,46 @@ pub fn halt() -> ! {
 /// selection Limine handed over (0 = SP_EL0).
 #[unsafe(no_mangle)]
 extern "C" fn kmain(spsel_at_entry: u64) -> ! {
-    // Without a console there is nobody to tell, so problems before the
-    // UART is mapped just stop the core.
+    // Without a supported protocol nothing Limine sent can be trusted, and
+    // there is no console yet to say so.
     if !BASE_REVISION.is_supported() {
         halt();
     }
+    // The screen first: it needs nothing but Limine's mappings, and on the
+    // board it is the only output anyone sees. From here on `out` prints
+    // to every console that is set up.
+    let screens = screen::init();
+    let mut out = Console;
     let (Some(hhdm), Some(rsdp), Some(exe)) = (HHDM.response(), RSDP.response(), EXECUTABLE.response()) else {
+        let _ = writeln!(out, "Limine sent no direct-map offset, ACPI pointer or kernel address; halting.");
         halt()
     };
-    let Some(tables) = acpi::Tables::new(rsdp.address as u64, hhdm.offset) else { halt() };
-    let Some(uart_phys) = tables.spcr_uart() else { halt() };
+    let Some(tables) = acpi::Tables::new(rsdp.address as u64, hhdm.offset) else {
+        let _ = writeln!(out, "No usable ACPI tables; halting.");
+        halt()
+    };
+    let Some(uart_phys) = tables.spcr_uart() else {
+        let _ = writeln!(out, "No console UART in the ACPI SPCR table; halting.");
+        halt()
+    };
+    // Read now, while Limine's page tables still map every ACPI table.
+    let conduit = tables.psci_conduit();
 
     // Our page tables are statics inside the kernel image, so their
     // physical address is their offset from the kernel's start.
     let kernel_phys = |va: u64| va - exe.virtual_base + exe.physical_base;
     let uart_virt = mmu::map_device_page(uart_phys, kernel_phys);
-    let mut out = uart::Pl011::new(uart_virt);
+    uart::set_console(uart_virt);
 
     let el = (mmu::read_current_el() >> 2) & 3;
     let _ = writeln!(out, "\n{}", include_str!("banner.txt"));
     let _ = writeln!(out, "  booted by Limine, running at EL{el}");
-    let _ = writeln!(out, "  console (ACPI SPCR): PL011 at {uart_phys:#x}, mapped at {uart_virt:#x}");
+    let _ = writeln!(out, "  serial console (ACPI SPCR): PL011 at {uart_phys:#x}, mapped at {uart_virt:#x}");
+    screen::describe(&mut out);
+    if screens == 0 {
+        let _ = writeln!(out, "  (printing to serial only)");
+    }
+    let _ = writeln!(out, "  timer: {} MHz", timer::frequency() / 1_000_000);
     let _ = writeln!(out, "  kernel: virtual {:#x} = physical {:#x}", exe.virtual_base, exe.physical_base);
     let _ = writeln!(out, "  RAM direct map offset (HHDM): {:#x}", hhdm.offset);
     let _ = writeln!(out, "  stack: Limine handed over on SP_EL{}, now on SP_EL{el}", if spsel_at_entry & 1 == 1 { el } else { 0 });
@@ -158,20 +183,25 @@ extern "C" fn kmain(spsel_at_entry: u64) -> ! {
     let kernel_tables = match vm::build(&mut frames, hhdm.offset, exe.virtual_base, exe.physical_base, uart_phys) {
         Ok(t) => t,
         Err(e) => {
-            let _ = writeln!(out, "Building page tables failed: {e:?}; halting.");
+            let _ = writeln!(out, "Building page tables failed: {e}; halting.");
             halt()
         }
     };
     let _ = writeln!(out, "  page tables built: {} tables, {} pages + {} blocks of 2 MiB, {} W^X violations",
         kernel_tables.tables, kernel_tables.pages, kernel_tables.blocks, kernel_tables.wx_violations);
     vm::switch_to(kernel_tables.root);
-    out = uart::Pl011::new(kernel_tables.uart);
+    uart::set_console(kernel_tables.uart);
     vm::disable_lower_half();
     let _ = writeln!(out, "  running on our own page tables; console now at {:#x}; lower half off", kernel_tables.uart);
 
-    // Deliberate faults, on request from the kernel command line.
+    // The kernel command line: deliberate faults on request, and how to end.
     let cmdline = CMDLINE.response().map_or("", |c| c.cmdline());
+    let mut reboot_after = None;
     for word in cmdline.split_whitespace() {
+        if let Some(secs) = word.strip_prefix("reboot-after=") {
+            reboot_after = secs.parse::<u64>().ok();
+            continue;
+        }
         match word {
             "fault-test" => {
                 let _ = writeln!(out, "  fault-test: reading unmapped address 0x0");
@@ -197,22 +227,27 @@ extern "C" fn kmain(spsel_at_entry: u64) -> ! {
         }
     }
 
-    match tables.psci_conduit() {
-        Some(conduit) => {
-            let _ = writeln!(out, "Powering off.");
-            psci::system_off(conduit)
+    let Some(conduit) = conduit else {
+        let _ = writeln!(out, "No PSCI in the FADT; halting.");
+        halt()
+    };
+    match reboot_after {
+        // On the board: leave the output up for a while, then restart. The
+        // one-time boot entry is used up by then, so Linux comes back.
+        Some(secs) => {
+            let _ = writeln!(out, "Rebooting in {secs} seconds.");
+            timer::wait_seconds(secs);
+            psci::system_reset(conduit)
         }
         None => {
-            let _ = writeln!(out, "No PSCI in the FADT; halting.");
-            halt()
+            let _ = writeln!(out, "Powering off.");
+            psci::system_off(conduit)
         }
     }
 }
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
-    if let Some(mut out) = uart::console() {
-        let _ = writeln!(out, "\nkernel panic: {info}");
-    }
+    let _ = writeln!(Console, "\nkernel panic: {info}");
     halt()
 }

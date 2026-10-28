@@ -5,12 +5,13 @@
 #![no_main]
 
 mod acpi;
+mod exceptions;
 mod mmu;
 mod psci;
 mod uart;
 
 use core::fmt::Write;
-use limine::request::{ExecutableAddressRequest, HhdmRequest, RsdpRequest};
+use limine::request::{ExecutableAddressRequest, ExecutableCmdlineRequest, HhdmRequest, RsdpRequest};
 use limine::{BaseRevision, RequestsEndMarker, RequestsStartMarker};
 
 // Requests: Limine scans the .requests section (between the two markers)
@@ -38,6 +39,11 @@ static RSDP: RsdpRequest = RsdpRequest::new();
 #[unsafe(link_section = ".requests")]
 static EXECUTABLE: ExecutableAddressRequest = ExecutableAddressRequest::new();
 
+/// The kernel command line (`cmdline:` in limine.conf).
+#[used]
+#[unsafe(link_section = ".requests")]
+static CMDLINE: ExecutableCmdlineRequest = ExecutableCmdlineRequest::new();
+
 #[used]
 #[unsafe(link_section = ".requests_start_marker")]
 static REQUESTS_START: RequestsStartMarker = RequestsStartMarker::new();
@@ -46,18 +52,40 @@ static REQUESTS_START: RequestsStartMarker = RequestsStartMarker::new();
 #[unsafe(link_section = ".requests_end_marker")]
 static REQUESTS_END: RequestsEndMarker = RequestsEndMarker::new();
 
+// The real entry point. Limine hands over with PSTATE.SPSel = 0, i.e. running
+// on SP_EL0, the stack pointer meant for user code; an exception would then
+// switch to this level's own stack pointer (SP_EL2, or SP_EL1 under KVM),
+// which nobody has set. So: keep the stack Limine gave us, but move it to
+// our own stack pointer, then call kmain with the old SPSel value. `bti jc`
+// marks this as a valid target of Limine's jump, should BTI be enforced.
+core::arch::global_asm!(
+    ".section .text._start, \"ax\"",
+    ".global _start",
+    "_start:",
+    "bti jc",
+    "mrs x0, SPSel",
+    "mov x1, sp",
+    "msr SPSel, #1",
+    "mov sp, x1",
+    "bl kmain",
+    "1:",
+    "wfe",
+    "b 1b",
+);
+
 /// Stop this core for good (WFE waits for an event that never comes).
-fn halt() -> ! {
+pub fn halt() -> ! {
     loop {
         // SAFETY: wfe has no effect besides waiting.
         unsafe { core::arch::asm!("wfe") };
     }
 }
 
-/// The entry point Limine jumps to, with interrupts masked, the MMU on and a
-/// 64 KiB stack. It must never return: Limine set the return address to 0.
+/// Called by `_start`, with interrupts masked, the MMU on and Limine's
+/// 64 KiB stack. Must never return. `spsel_at_entry` is the stack-pointer
+/// selection Limine handed over (0 = SP_EL0).
 #[unsafe(no_mangle)]
-extern "C" fn kmain() -> ! {
+extern "C" fn kmain(spsel_at_entry: u64) -> ! {
     // Without a console there is nobody to tell, so problems before the
     // UART is mapped just stop the core.
     if !BASE_REVISION.is_supported() {
@@ -80,6 +108,18 @@ extern "C" fn kmain() -> ! {
     let _ = writeln!(out, "  console (ACPI SPCR): PL011 at {uart_phys:#x}, mapped at {uart_virt:#x}");
     let _ = writeln!(out, "  kernel: virtual {:#x} = physical {:#x}", exe.virtual_base, exe.physical_base);
     let _ = writeln!(out, "  RAM direct map offset (HHDM): {:#x}", hhdm.offset);
+    let _ = writeln!(out, "  stack: Limine handed over on SP_EL{}, now on SP_EL{el}", if spsel_at_entry & 1 == 1 { el } else { 0 });
+
+    exceptions::install();
+    let _ = writeln!(out, "  exception vectors installed");
+    exceptions::self_test();
+
+    let cmdline = CMDLINE.response().map_or("", |c| c.cmdline());
+    if cmdline.split_whitespace().any(|w| w == "fault-test") {
+        let _ = writeln!(out, "  fault-test: reading unmapped address 0x0");
+        // SAFETY: deliberately faults; the exception handler reports it and halts.
+        unsafe { core::ptr::read_volatile(core::ptr::null::<u64>()) };
+    }
 
     match tables.psci_conduit() {
         Some(conduit) => {

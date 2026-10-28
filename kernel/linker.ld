@@ -3,7 +3,7 @@
  * each part gets its own 4 KiB-aligned segment so it can get its own
  * permissions (read-only, executable, writable). */
 OUTPUT_FORMAT(elf64-littleaarch64)
-ENTRY(kmain)
+ENTRY(_start)
 
 PHDRS
 {

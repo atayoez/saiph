@@ -1,7 +1,11 @@
+cargo-features = ["per-package-target"]
+
 [package]
 name = "probe"
 version = "0.1.0"
 edition = "2024"
+# Always built as a UEFI application (per-package-target, nightly Cargo).
+forced-target = "aarch64-unknown-uefi"
 
 [dependencies]
 uefi = { version = "0.41", features = ["panic_handler", "alloc", "global_allocator"] }

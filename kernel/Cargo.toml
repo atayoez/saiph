@@ -1,0 +1,12 @@
+cargo-features = ["per-package-target"]
+
+[package]
+name = "kernel"
+version = "0.1.0"
+edition = "2024"
+# Bare-metal ELF that never uses FP/SIMD registers (per-package-target,
+# nightly Cargo). Limine loads it; see kernel/linker.ld and limine.conf.
+forced-target = "aarch64-unknown-none-softfloat"
+
+[dependencies]
+limine = "0.6"

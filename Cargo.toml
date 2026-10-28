@@ -1,3 +1,10 @@
 [workspace]
 resolver = "3"
-members = ["probe"]
+members = ["kernel", "probe"]
+
+# compiler_builtins (rebuilt from source by build-std) must be optimized even
+# in debug builds: unoptimized, it keeps references to 128-bit float maths
+# functions (fmal, rintl) that the UEFI target does not provide. Rust's own
+# prebuilt copies are optimized too.
+[profile.dev.package.compiler_builtins]
+opt-level = 3

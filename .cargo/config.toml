@@ -1,0 +1,28 @@
+# Nightly-only settings for the whole workspace.
+
+[build]
+# Both targets, so build-std knows to build `core` for each. Every crate
+# still builds only for its own `forced-target`. (Without this, nightly
+# Cargo panics when build-std meets per-package-target.)
+target = ["aarch64-unknown-none-softfloat", "aarch64-unknown-uefi"]
+
+[unstable]
+# Rebuild core/alloc from source for every target, so they are compiled
+# with the same flags as our code (branch protection must match: it is a
+# "target modifier"). Needs the rust-src component.
+build-std = ["core", "compiler_builtins", "alloc"]
+# memcpy, memset & co. for bare metal, from compiler_builtins.
+build-std-features = ["compiler-builtins-mem"]
+
+[target.aarch64-unknown-none-softfloat]
+# BTI landing pads and PAC-signed return addresses in all kernel code.
+# Both use instructions that do nothing until the kernel switches the
+# features on, so they are safe to compile in from the start.
+rustflags = ["-Zbranch-protection=bti,pac-ret"]
+# Boots the kernel in QEMU; used by `cargo kernel` (alias below).
+runner = "scripts/run-kernel.sh"
+
+[alias]
+# `cargo kernel [-- tcg|kvm]` builds the kernel and boots it in QEMU via the
+# runner above. `cargo run` needs exactly one target, so the alias names it.
+kernel = ["run", "-p", "kernel", "--target", "aarch64-unknown-none-softfloat"]

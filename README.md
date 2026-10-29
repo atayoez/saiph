@@ -108,7 +108,7 @@ The firmware starts systemd-boot, which starts Limine for one boot; Limine loads
 
 <p align="center"><img src="docs/address-space.svg" width="800" alt="Virtual address space: kernel image, kernel heap, device window, direct map of RAM, invalid addresses, and the switched-off lower half"></p>
 
-- **Branch protection everywhere.** Saiph is built for `aarch64-unknown-none-softfloat` with `-Zbuild-std` and `-Zbranch-protection=bti,pac-ret`, so `core` and every other crate it uses are compiled with signed return addresses and landing pads, not just the kernel's own code.
+- **Branch protection everywhere.** Saiph is built for `aarch64-unknown-none-softfloat` with `-Zbuild-std` and `-Zbranch-protection=bti,pac-ret`, so `core` and every other crate it uses are compiled with signed return addresses and landing pads, not just the kernel's own code. Everything is also compiled for the O6's cores (`-Ctarget-cpu=cortex-a520`, which the A720s run too), for Armv9.2 instructions such as single-instruction atomics.
 - **W^X by construction.** The [`paging`](paging) crate has no way to ask for a page that is both writable and executable, and the kernel checks every mapping after building its tables.
 - **Single-user by design.** There will be no root and no user accounts. Programs will still be isolated from each other and from the kernel, just not by who is logged in.
 

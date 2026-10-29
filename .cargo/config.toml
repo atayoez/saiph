@@ -23,12 +23,17 @@ kernel = [
     "-Zbuild-std=core,compiler_builtins,alloc",
     # memcpy, memset & co. for bare metal, from compiler_builtins.
     "-Zbuild-std-features=compiler-builtins-mem",
-    # BTI landing pads and PAC-signed return addresses in every function.
-    # Both are instructions that do nothing until the kernel switches the
-    # features on. (Only here, not for every build: an IDE's `cargo check`
-    # then compiles the kernel against the prebuilt core, and such a kernel
-    # leaves PAC and BTI off, see kernel/src/protect.rs.)
-    "--config", "target.aarch64-unknown-none-softfloat.rustflags = ['-Zbranch-protection=bti,pac-ret']",
+    # BTI landing pads and PAC-signed return addresses in every function;
+    # they change nothing until the kernel switches the features on. And
+    # code for the O6's cores: `cortex-a520` is the smaller of its two core
+    # types and has nothing the A720 lacks, so it runs on both. It brings
+    # Armv9.2's instructions, such as single-instruction atomics (LSE) and
+    # combined authenticate-and-return (`retaa`, so the kernel needs a CPU
+    # with PAC, as the O6 and QEMU's `max` and `host` CPUs have).
+    # (Only here, not for every build: an IDE's `cargo check` then compiles
+    # the kernel against the prebuilt core, and such a kernel leaves PAC and
+    # BTI off, see kernel/src/protect.rs.)
+    "--config", "target.aarch64-unknown-none-softfloat.rustflags = ['-Zbranch-protection=bti,pac-ret', '-Ctarget-cpu=cortex-a520']",
     "--",
 ]
 board = ["kernel", "board"]

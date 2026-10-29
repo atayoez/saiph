@@ -1,9 +1,10 @@
 //! Pointer authentication (PAC) and branch target identification (BTI).
 //!
 //! Every function compiled with `-Zbranch-protection=bti,pac-ret` signs its
-//! return address on entry (`paciasp`) and checks it before returning
-//! (`autiasp`), and every possible indirect-branch target starts with a
-//! `bti` landing pad. Both are hint instructions that do nothing until:
+//! return address on entry (`paciasp`) and checks it as it returns
+//! (`retaa`, since the kernel is compiled for the O6's cores; for older
+//! CPUs it would be `autiasp` + `ret`), and every possible indirect-branch
+//! target starts with a `bti` landing pad. They change nothing until:
 //! - PAC: an instruction key A is loaded and SCTLR.EnIA is set;
 //! - BTI: the code pages are marked guarded (GP bit). SCTLR.BT then also
 //!   stops `paciasp` from counting as a landing pad for plain `br` jumps.

@@ -27,8 +27,8 @@ A learning and research OS for one Armv9 board, built in small steps. UEFI and L
 - **A console on the screen and on serial.** The serial port comes from the ACPI SPCR table. On the screen, Saiph draws into the UEFI framebuffer in [Fira Code](https://github.com/tonsky/FiraCode), rendered into letter images at build time.
 - **Readable crash reports**: the cause, the faulting address, the page-table level and every register.
 - **Pointer authentication and BTI.** Return addresses are signed with a key from Limine's entropy, and kernel code only accepts branches to landing pads.
-- **Physical memory**: a bitmap frame allocator over Limine's memory map.
-- **Its own page tables**: each part of the kernel mapped W^X, all RAM in a direct map built mostly from 2 MiB blocks, a window for device registers, and the lower half switched off for future user programs.
+- **Physical memory**: a bitmap frame allocator over Limine's memory map, in 16 KiB frames.
+- **Its own page tables, with 16 KiB pages** (like Apple's systems and Android 15+): each part of the kernel mapped W^X, all RAM in a direct map built mostly from 32 MiB blocks, a window for device registers, and the lower half switched off for future user programs. The switch from Limine's tables is break-before-make, so it is safe on any core.
 - **A kernel heap** for `Box`, `Vec` and `String`, run by [talc](https://github.com/SFBdragon/talc). It lives in an address range of its own and grows on demand: when it runs out, the kernel maps more frames at its end, at least 2 MiB at a time.
 - **Power off or reboot** through PSCI.
 - **Deliberate faults on request** (`fault-test`, `pac-test`, `bti-test`, `wx-test`) that show each protection is enforced by the hardware, not just configured.

@@ -108,7 +108,7 @@ pub fn self_test(out: &mut impl Write, hhdm: u64) -> bool {
             ok &= p.read_volatile() == 0x5eed_0000 + n as u64;
         }
     }
-    // 16 contiguous frames on a 64 KiB boundary.
+    // 16 contiguous frames on a 256 KiB boundary.
     let run = fa.alloc_contiguous(16, 16);
     ok &= run.is_some_and(|r| r % (16 * FRAME_SIZE) == 0);
     for f in singles {

@@ -65,7 +65,7 @@
   <text class="name mapped-t" x="300" y="248">All RAM (direct map)</text>
   <text class="d1" x="408" y="236">base + physical address, Limine's offset</text>
   <text class="d2" x="408" y="253">read + write, never execute;</text>
-  <text class="d2" x="408" y="268">mostly 2 MiB blocks</text>
+  <text class="d2" x="408" y="268">mostly 32 MiB blocks</text>
   <line class="tick" x1="198" y1="276.5" x2="208" y2="276.5"/>
   <text class="addr" x="194" y="280.5">0xffff_0000_0000_0000</text>
 

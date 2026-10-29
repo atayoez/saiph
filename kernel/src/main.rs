@@ -199,7 +199,7 @@ extern "C" fn kmain(spsel_at_entry: u64) -> ! {
             halt()
         }
     };
-    let _ = writeln!(out, "  page tables built: {} tables, {} pages + {} blocks of 2 MiB, {} W^X violations",
+    let _ = writeln!(out, "  page tables built: {} tables, {} pages of 16 KiB + {} blocks of 32 MiB, {} W^X violations",
         kernel_tables.tables, kernel_tables.pages, kernel_tables.blocks, kernel_tables.wx_violations);
     let uart = kernel_tables.uart;
     vm::switch_to(kernel_tables);

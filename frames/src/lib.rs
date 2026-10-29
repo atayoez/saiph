@@ -1,4 +1,4 @@
-//! A physical frame allocator: one bit per 4 KiB frame (1 = in use).
+//! A physical frame allocator: one bit per 16 KiB frame (1 = in use).
 //!
 //! The kernel gives it a bitmap and the range of physical memory it covers,
 //! marks the usable regions free, then allocates and frees single frames or
@@ -7,8 +7,8 @@
 
 #![no_std]
 
-/// Size of one frame (the MMU's smallest page).
-pub const FRAME_SIZE: u64 = 4096;
+/// Size of one frame: Saiph's page size (see the `paging` crate).
+pub const FRAME_SIZE: u64 = 16 * 1024;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum FreeError {
@@ -126,7 +126,7 @@ impl<'a> FrameAllocator<'a> {
     }
 
     /// Allocate `count` physically contiguous frames whose first frame's
-    /// address is a multiple of `align` frames (e.g. align = 512 for 2 MiB).
+    /// address is a multiple of `align` frames (e.g. align = 2048 for 32 MiB).
     pub fn alloc_contiguous(&mut self, count: usize, align: usize) -> Option<u64> {
         assert!(count > 0 && align > 0);
         // Alignment is about physical addresses, so start from the first
@@ -237,7 +237,7 @@ mod tests {
         let mut bits = vec![0; words_for(10)];
         let mut a = FrameAllocator::new(&mut bits, BASE, 10);
         // 1.5 frames starting half-way into frame 0: only frame 1 is whole.
-        a.mark_free(BASE + 2048, 6144);
+        a.mark_free(BASE + FRAME_SIZE / 2, FRAME_SIZE * 3 / 2);
         assert_eq!(a.free_frames(), 1);
         assert_eq!(a.alloc(), Some(BASE + FRAME_SIZE));
         let mut bits = vec![0; words_for(10)];

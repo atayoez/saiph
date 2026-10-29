@@ -1,10 +1,12 @@
-//! Building AArch64 stage-1 page tables (4 KiB granule, 48-bit addresses).
+//! Building AArch64 stage-1 page tables (16 KiB granule, 48-bit addresses).
 //!
 //! A virtual address is translated in up to four steps (levels 0..3). Each
-//! level is a 4 KiB table of 512 eight-byte descriptors and uses 9 address
-//! bits as its index. A level-2 descriptor can map a whole 2 MiB block
+//! table is one 16 KiB page of 2048 eight-byte descriptors, indexed by 11
+//! address bits; level 0, at the top, only has bit 47 left over, so it uses
+//! just two entries. A level-2 descriptor can map a whole 32 MiB block
 //! instead of pointing to a level-3 table; a level-3 descriptor maps a
-//! 4 KiB page.
+//! 16 KiB page. (With 4 KiB pages it would be 512 entries, 9 bits per
+//! level and 2 MiB blocks.)
 //!
 //! Tables live in physical memory. `TableMemory` abstracts how to get a new
 //! zeroed table and how to reach a table by its physical address, so the
@@ -13,8 +15,10 @@
 
 #![no_std]
 
-pub const PAGE_SIZE: u64 = 4096;
-pub const BLOCK_SIZE: u64 = 2 << 20;
+pub const PAGE_SIZE: u64 = 16 * 1024;
+pub const BLOCK_SIZE: u64 = 32 << 20;
+/// Descriptors per table.
+pub const ENTRIES: usize = 2048;
 
 const VALID: u64 = 1 << 0;
 /// Below level 3: "points to a table". At level 3: "maps a page".
@@ -30,8 +34,8 @@ const GUARDED: u64 = 1 << 50;
 /// Never executable by the kernel (privileged) / by user code.
 const PXN: u64 = 1 << 53;
 const UXN: u64 = 1 << 54;
-/// Output address (physical address) bits of a descriptor.
-const ADDRESS: u64 = 0x0000_ffff_ffff_f000;
+/// Output address (physical address) bits of a descriptor: 47..14.
+const ADDRESS: u64 = 0x0000_ffff_ffff_c000;
 
 /// MAIR slots, as Limine sets them up (0, 1) plus the one we add (2).
 pub const ATTR_NORMAL: u64 = 0;
@@ -80,15 +84,15 @@ pub fn writable_and_executable(descriptor: u64) -> bool {
 }
 
 pub trait TableMemory {
-    /// A new, zeroed 4 KiB table; returns its physical address.
+    /// A new, zeroed table (one page); returns its physical address.
     fn alloc_table(&mut self) -> Option<u64>;
     /// The table at physical address `phys`.
-    fn table(&mut self, phys: u64) -> &mut [u64; 512];
+    fn table(&mut self, phys: u64) -> &mut [u64; ENTRIES];
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum MapError {
-    /// An address or length is not a multiple of 4 KiB.
+    /// An address or length is not a multiple of the page size.
     Misaligned,
     /// Something is already mapped at this virtual address.
     AlreadyMapped(u64),
@@ -96,14 +100,21 @@ pub enum MapError {
     OutOfMemory,
 }
 
-/// Index into the table at `level` for virtual address `va`.
-fn index(va: u64, level: u32) -> usize {
-    ((va >> (12 + 9 * (3 - level))) & 511) as usize
+/// Lowest address bit a descriptor at `level` translates.
+fn shift(level: u32) -> u32 {
+    14 + 11 * (3 - level)
 }
 
-/// Bytes one descriptor covers at `level` (level 1: 1 GiB, 2: 2 MiB, 3: 4 KiB).
+/// Index into the table at `level` for virtual address `va`. Level 0 only
+/// has bit 47 (the bits above it are copies of it).
+fn index(va: u64, level: u32) -> usize {
+    let mask = if level == 0 { 1 } else { ENTRIES as u64 - 1 };
+    ((va >> shift(level)) & mask) as usize
+}
+
+/// Bytes one descriptor covers at `level` (level 1: 64 GiB, 2: 32 MiB, 3: 16 KiB).
 fn span(level: u32) -> u64 {
-    1 << (12 + 9 * (3 - level))
+    1 << shift(level)
 }
 
 /// Upper-half addresses (bit 47 set) have their top 16 bits set too.
@@ -125,9 +136,9 @@ impl<M: TableMemory> Mapper<M> {
         Some(Mapper { root, mem, tables: 1 })
     }
 
-    /// Map `len` bytes at virtual `va` to physical `pa`. Uses 2 MiB blocks
-    /// wherever both addresses are 2 MiB-aligned and enough length remains,
-    /// 4 KiB pages elsewhere.
+    /// Map `len` bytes at virtual `va` to physical `pa`. Uses 32 MiB blocks
+    /// wherever both addresses are 32 MiB-aligned and enough length
+    /// remains, 16 KiB pages elsewhere.
     pub fn map(&mut self, va: u64, pa: u64, len: u64, kind: Kind) -> Result<(), MapError> {
         if (va | pa | len) % PAGE_SIZE != 0 {
             return Err(MapError::Misaligned);
@@ -197,12 +208,12 @@ impl<M: TableMemory> Mapper<M> {
     }
 
     fn visit(&mut self, table: u64, level: u32, base: u64, f: &mut impl FnMut(u64, u64, u64, u64)) {
-        for i in 0..512 {
+        for i in 0..ENTRIES {
             let d = self.mem.table(table)[i];
             if d & VALID == 0 {
                 continue;
             }
-            let va = base | ((i as u64) << (12 + 9 * (3 - level)));
+            let va = base | ((i as u64) << shift(level));
             if level < 3 && d & TABLE_OR_PAGE != 0 {
                 self.visit(d & ADDRESS, level + 1, va, f);
             } else {
@@ -221,21 +232,21 @@ mod tests {
 
     /// Tables in heap memory, at made-up physical addresses.
     struct FakeMemory {
-        tables: Vec<Box<[u64; 512]>>,
+        tables: Vec<Box<[u64; ENTRIES]>>,
         limit: usize,
     }
 
-    const FAKE_BASE: u64 = 0x10_0000;
+    const FAKE_BASE: u64 = 0x100_0000;
 
     impl TableMemory for FakeMemory {
         fn alloc_table(&mut self) -> Option<u64> {
             if self.tables.len() == self.limit {
                 return None;
             }
-            self.tables.push(Box::new([0; 512]));
+            self.tables.push(Box::new([0; ENTRIES]));
             Some(FAKE_BASE + (self.tables.len() as u64 - 1) * PAGE_SIZE)
         }
-        fn table(&mut self, phys: u64) -> &mut [u64; 512] {
+        fn table(&mut self, phys: u64) -> &mut [u64; ENTRIES] {
             &mut self.tables[((phys - FAKE_BASE) / PAGE_SIZE) as usize]
         }
     }
@@ -261,15 +272,15 @@ mod tests {
     fn uses_blocks_when_aligned() {
         let mut m = mapper();
         m.map(0xffff_0000_4000_0000, 0x4000_0000, 2 * BLOCK_SIZE, Kind::ReadWrite).unwrap();
-        let (pa, _, level) = m.translate(0xffff_0000_4020_0010).unwrap();
-        assert_eq!((pa, level), (0x4020_0010, 2));
+        let (pa, _, level) = m.translate(0xffff_0000_4200_0010).unwrap();
+        assert_eq!((pa, level), (0x4200_0010, 2));
         assert_eq!(m.tables, 3); // no level-3 table needed
     }
 
     #[test]
     fn ragged_regions_mix_pages_and_blocks() {
         let mut m = mapper();
-        let (va, pa) = (0xffff_0000_401f_e000, 0x401f_e000);
+        let (va, pa) = (0xffff_0000_41ff_8000, 0x41ff_8000); // two pages below a block boundary
         let len = 2 * PAGE_SIZE + BLOCK_SIZE + 3 * PAGE_SIZE;
         m.map(va, pa, len, Kind::ReadWrite).unwrap();
         for off in (0..len).step_by(PAGE_SIZE as usize) {
@@ -299,7 +310,7 @@ mod tests {
         assert!(matches!(m.map(block_va, 0x6000_0000, BLOCK_SIZE, Kind::ReadWrite), Err(MapError::AlreadyMapped(_))));
         // A page inside an existing block.
         m.map(0xffff_0000_0000_0000, 0, BLOCK_SIZE, Kind::ReadWrite).unwrap();
-        assert!(matches!(m.map(0xffff_0000_0000_1000, 0, PAGE_SIZE, Kind::ReadWrite), Err(MapError::AlreadyMapped(_))));
+        assert!(matches!(m.map(0xffff_0000_0000_4000, 0, PAGE_SIZE, Kind::ReadWrite), Err(MapError::AlreadyMapped(_))));
     }
 
     #[test]
@@ -314,7 +325,7 @@ mod tests {
         let kinds = [Kind::Code, Kind::UnguardedCode, Kind::ReadOnly, Kind::ReadWrite, Kind::Device, Kind::Framebuffer];
         for (n, kind) in kinds.into_iter().enumerate() {
             let va = KERNEL + n as u64 * PAGE_SIZE;
-            m.map(va, 0x1000 * n as u64, PAGE_SIZE, kind).unwrap();
+            m.map(va, PAGE_SIZE * n as u64, PAGE_SIZE, kind).unwrap();
             let d = m.translate(va).unwrap().1;
             assert!(!writable_and_executable(d), "{kind:?} is W+X");
             assert!(d & UXN != 0 && d & ACCESS_FLAG != 0);
@@ -336,6 +347,17 @@ mod tests {
         assert!(writable_and_executable(VALID | ACCESS_FLAG));
         assert!(!writable_and_executable(VALID | PXN));
         assert!(!writable_and_executable(VALID | READ_ONLY));
+    }
+
+    #[test]
+    fn upper_and_lower_half_use_the_two_level_0_entries() {
+        let mut m = mapper();
+        m.map(KERNEL, 0x4000_0000, PAGE_SIZE, Kind::Code).unwrap();
+        m.map(0x10_0000, 0x4000_4000, PAGE_SIZE, Kind::ReadOnly).unwrap();
+        let root = m.root;
+        let entries = m.mem.table(root);
+        assert!(entries[0] & VALID != 0 && entries[1] & VALID != 0);
+        assert!(entries[2..].iter().all(|&d| d == 0));
     }
 
     #[test]

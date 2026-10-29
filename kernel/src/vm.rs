@@ -15,7 +15,7 @@
 
 use crate::{memory, mmu, screen};
 use limine::memmap;
-use paging::{Kind, MapError, Mapper, PAGE_SIZE, TableMemory};
+use paging::{ENTRIES, Kind, MapError, Mapper, PAGE_SIZE, TableMemory};
 use spin::Mutex;
 
 /// Where device registers appear: this offset plus their physical address.
@@ -39,9 +39,9 @@ impl TableMemory for KernelTables {
         unsafe { core::ptr::write_bytes((frame + self.hhdm) as *mut u8, 0, PAGE_SIZE as usize) };
         Some(frame)
     }
-    fn table(&mut self, phys: u64) -> &mut [u64; 512] {
+    fn table(&mut self, phys: u64) -> &mut [u64; ENTRIES] {
         // SAFETY: only called for tables this mapper allocated.
-        unsafe { &mut *((phys + self.hhdm) as *mut [u64; 512]) }
+        unsafe { &mut *((phys + self.hhdm) as *mut [u64; ENTRIES]) }
     }
 }
 
@@ -72,6 +72,11 @@ pub enum Error {
     NotRunning,
     /// The page that switches tables could not be mapped in the lower half.
     Trampoline,
+    /// The CPU cannot translate with 16 KiB pages.
+    NoSixteenKiB,
+    /// Limine loaded the kernel at a physical address that is not a
+    /// multiple of the page size.
+    KernelMisaligned,
 }
 
 impl core::fmt::Display for Error {
@@ -81,6 +86,8 @@ impl core::fmt::Display for Error {
             Error::TooManyRegions => write!(f, "the memory map has too many regions"),
             Error::NotRunning => write!(f, "the kernel's page tables are not in use yet"),
             Error::Trampoline => write!(f, "could not map the table switch at its physical address"),
+            Error::NoSixteenKiB => write!(f, "this CPU has no 16 KiB pages"),
+            Error::KernelMisaligned => write!(f, "the kernel's physical address is not 16 KiB-aligned"),
         }
     }
 }
@@ -108,11 +115,21 @@ pub struct Tables {
 /// `guard_code`: mark the code pages BTI-guarded (only for a kernel built
 /// with landing pads, see `protect::built_with_branch_protection`).
 pub fn build(hhdm: u64, virt_base: u64, phys_base: u64, uart_phys: u64, guard_code: bool) -> Result<Tables, Error> {
+    // ID_AA64MMFR0.TGran16, bits 23..20: 0 = no 16 KiB pages.
+    let mmfr0: u64;
+    // SAFETY: reading an ID register has no side effects.
+    unsafe { core::arch::asm!("mrs {}, ID_AA64MMFR0_EL1", out(reg) mmfr0) };
+    if (mmfr0 >> 20) & 0xf == 0 {
+        return Err(Error::NoSixteenKiB);
+    }
+    if !phys_base.is_multiple_of(PAGE_SIZE) {
+        return Err(Error::KernelMisaligned);
+    }
     let mut m = Mapper::new(KernelTables { hhdm }).ok_or(MapError::OutOfMemory)?;
     let phys = |va: u64| va - virt_base + phys_base;
 
-    // The kernel image, segment by segment. Each segment starts on a page
-    // boundary (see linker.ld), so rounding a segment's end up never
+    // The kernel image, segment by segment. Each segment starts on a 16 KiB
+    // page boundary (see linker.ld), so rounding a segment's end up never
     // reaches into the next one.
     let symbols = |s: &u8| s as *const u8 as u64;
     // SAFETY: linker symbols; only their addresses are used.
@@ -134,7 +151,7 @@ pub fn build(hhdm: u64, virt_base: u64, phys_base: u64, uart_phys: u64, guard_co
     // The direct map: the same memory types Limine maps there, plus the
     // screens in use (in case the memory map does not list them). Ranges
     // are rounded out to whole pages, sorted, and merged when they touch and
-    // have the same kind (so 2 MiB blocks can span region boundaries). A
+    // have the same kind (so 32 MiB blocks can span region boundaries). A
     // page claimed by two ranges keeps the kind of the one mapped first.
     let memory = memory::entries().iter().filter_map(|e| {
         let kind = match e.type_ {
@@ -208,6 +225,8 @@ pub fn build(hhdm: u64, virt_base: u64, phys_base: u64, uart_phys: u64, guard_co
 // off (TCR.EPD1), drops every cached translation, then installs the new
 // tables and the new TCR, and returns to the caller in the upper half.
 // It must not touch the stack or anything else in the upper half.
+// The new TCR also switches the upper half from Limine's 4 KiB pages to
+// our 16 KiB ones, which is only allowed while TTBR1 is not in use.
 //
 // saiph_switch_tables(root: x0, tcr: x1)
 core::arch::global_asm!(
@@ -236,20 +255,27 @@ unsafe extern "C" {
     fn saiph_switch_tables(root: u64, tcr: u64);
 }
 
-/// Switch the upper half to the tables `build` made, and keep them for
-/// `map`. The new tables map the running code, stack and data at the same
-/// addresses, so execution simply continues.
+/// TCR bits: EPD1 (no walks through TTBR1) and TG1 (the upper half's page
+/// size: 0b01 = 16 KiB, 0b10 = 4 KiB).
+const EPD1: u64 = 1 << 23;
+const TG1: u64 = 0b11 << 30;
+const TG1_16K: u64 = 0b01 << 30;
+
+/// Switch the upper half to the tables `build` made, with 16 KiB pages,
+/// and keep them for `map`. The new tables map the running code, stack and
+/// data at the same addresses, so execution simply continues.
 pub fn switch_to(tables: Tables) {
     let tcr: u64;
     // SAFETY: reading TCR has no side effects.
     unsafe { core::arch::asm!("mrs {}, TCR_EL1", out(reg) tcr) };
+    let tcr = (tcr & !(EPD1 | TG1)) | TG1_16K;
     // SAFETY: `trampoline` is saiph_switch_tables at its identity mapping
     // (see `build`); the tables are complete; the DSB makes them visible
     // to the table walker first.
     unsafe {
         core::arch::asm!("dsb ishst");
         let switch: unsafe extern "C" fn(u64, u64) = core::mem::transmute(tables.trampoline as usize);
-        switch(tables.root, tcr & !(1 << 23));
+        switch(tables.root, tcr);
     }
     *RUNNING.lock() = Some(tables.mapper);
 }

@@ -137,8 +137,8 @@ on, and `cargo kernel` / `cargo board` always build it with the right flags.
    nested virtualization.
 2. **Turn on BTI, PAC (QARMA3 is cheap; FPAC makes failures trap at once) and
    MTE (asynchronous or asymmetric mode).** They work identically on every core.
-3. **Page tables:** 4K pages and 40-bit physical addresses are enough for 16 GB;
-   LPA2 is not available.
+3. **Page tables:** 40-bit physical addresses are enough for 16 GB; LPA2 is not
+   available. All three page sizes work; Saiph uses 16K (since 2026-10-29).
 4. **Tell core types apart by `MIDR_EL1`, not the MADT.** Expect SPE only on A720s.
 5. **Read cache geometry from `CLIDR`/`CCSIDR`.** Don't use the PPTT.
 6. **GIC-700 GICv4.1:** watch erratum 2941627 if using EOImode=1.

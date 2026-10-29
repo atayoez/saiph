@@ -1,7 +1,7 @@
 /* The kernel lives in the top 2 GiB of the address space, where Limine
  * maps it. Limine finds our requests between the start and end markers;
- * each part gets its own 4 KiB-aligned segment so it can get its own
- * permissions (read-only, executable, writable). */
+ * each part gets its own segment, aligned to Saiph's 16 KiB pages, so it
+ * can get its own permissions (read-only, executable, writable). */
 OUTPUT_FORMAT(elf64-littleaarch64)
 ENTRY(_start)
 
@@ -24,21 +24,21 @@ SECTIONS
         KEEP(*(.requests_end_marker))
     } :limine_requests
 
-    . = ALIGN(4096);
+    . = ALIGN(16384);
     .text : {
         __text_start = .;
         *(.text .text.*)
         __text_end = .;
     } :text
 
-    . = ALIGN(4096);
+    . = ALIGN(16384);
     .rodata : {
         __rodata_start = .;
         *(.rodata .rodata.*)
         __rodata_end = .;
     } :rodata
 
-    . = ALIGN(4096);
+    . = ALIGN(16384);
     .data : {
         __data_start = .;
         *(.data .data.*)

@@ -65,7 +65,7 @@
 
   <rect class="box" x="348.5" y="138.5" width="104" height="63" rx="8"/>
   <text class="bt2" x="400" y="166">Frames</text>
-  <text class="bs" x="400" y="186">4 KiB each</text>
+  <text class="bs" x="400" y="186">16 KiB each</text>
   <polygon class="head" points="462,170 454,165 454,175"/>
 
   <rect class="box" x="464.5" y="138.5" width="104" height="63" rx="8"/>

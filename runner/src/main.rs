@@ -125,8 +125,9 @@ fn qemu(kernel: &Path, mode: &str, words: &[String]) -> Result {
 
     let machine: &[&str] = match mode {
         "kvm" => &["-M", "virt,gic-version=3", "-cpu", "host", "-accel", "kvm"],
-        // pauth-qarma3: the O6's pointer-authentication algorithm.
-        _ => &["-M", "virt,gic-version=3,virtualization=on", "-cpu", "max,pauth-qarma3=on"],
+        // GICv4 and pauth-qarma3, like the O6's GIC-700 and its pointer
+        // authentication algorithm.
+        _ => &["-M", "virt,gic-version=4,virtualization=on", "-cpu", "max,pauth-qarma3=on"],
     };
     let error = Command::new("qemu-system-aarch64")
         .args(machine)

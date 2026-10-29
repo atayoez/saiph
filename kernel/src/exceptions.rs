@@ -8,6 +8,7 @@
 //! puts its slot number in x0 and jumps to common code, which saves the
 //! remaining registers plus ELR/SPSR/ESR/FAR as a `Frame` on the stack,
 //! calls `saiph_exception`, restores everything and returns with `eret`.
+//! IRQs go on to `irq::handle`; everything else unexpected is reported.
 //! The `_EL1` register names reach the EL2 registers under VHE.
 
 use crate::console::Console;
@@ -198,6 +199,11 @@ mod alloc_free {
 /// Called by the vector code for every exception.
 #[unsafe(no_mangle)]
 extern "C" fn saiph_exception(slot: u64, frame: &mut Frame) {
+    // Interrupts are routine, not errors: they go to the interrupt code.
+    if slot & 3 == 1 {
+        crate::irq::handle();
+        return;
+    }
     // Set the flag, noting whether it was already set. In assembly, as even
     // a function call may be what faults.
     let nested: u32;

@@ -1,8 +1,8 @@
 //! The Saiph kernel, early days: Limine loads it; it sets up its consoles
 //! (screen and serial), exceptions, PAC and BTI, physical memory, its own
-//! page tables and a heap, then powers the machine off, or reboots it after
-//! a wait when the command line says `reboot-after=<seconds>` (as on the
-//! board).
+//! page tables, a heap, interrupts and the timer, then powers the machine
+//! off, or reboots it after a countdown when the command line says
+//! `reboot-after=<seconds>` (as on the board).
 
 #![no_std]
 #![no_main]
@@ -12,7 +12,9 @@ extern crate alloc;
 mod acpi;
 mod console;
 mod exceptions;
+mod gic;
 mod heap;
+mod irq;
 mod memory;
 mod mmu;
 mod protect;
@@ -124,6 +126,9 @@ extern "C" fn kmain(spsel_at_entry: u64) -> ! {
     };
     // Read now, while Limine's page tables still map every ACPI table.
     let conduit = tables.psci_conduit();
+    let gic_info = tables.gic();
+    let el = (mmu::read_current_el() >> 2) & 3;
+    let timer_irq = tables.virtual_timer_interrupt(el == 2);
 
     // Our page tables are statics inside the kernel image, so their
     // physical address is their offset from the kernel's start.
@@ -131,7 +136,6 @@ extern "C" fn kmain(spsel_at_entry: u64) -> ! {
     let uart_virt = mmu::map_device_page(uart_phys, kernel_phys);
     uart::set_console(uart_virt);
 
-    let el = (mmu::read_current_el() >> 2) & 3;
     let _ = writeln!(out, "\n{}", include_str!("banner.txt"));
     let _ = writeln!(out, "  booted by Limine, running at EL{el}");
     let _ = writeln!(out, "  serial console (ACPI SPCR): PL011 at {uart_phys:#x}, mapped at {uart_virt:#x}");
@@ -211,6 +215,34 @@ extern "C" fn kmain(spsel_at_entry: u64) -> ! {
     // The heap grows in its own region of these tables.
     heap::self_test(&mut out);
 
+    // Interrupts: the GIC first, then let them in, then the timer.
+    match gic_info.as_ref().map(gic::init) {
+        Some(Ok(found)) => {
+            let _ = writeln!(out, "  interrupts: GICv{} (IIDR {:#x}), {} interrupt IDs, this core's redistributor at {:#x}",
+                found.arch, found.iidr, found.lines, found.redistributor);
+            irq::unmask();
+            irq::self_test(&mut out);
+            match timer_irq {
+                Some((intid, edge)) => {
+                    timer::init(intid, if edge { gic::Trigger::Edge } else { gic::Trigger::Level });
+                    let (ok, us) = timer::self_test();
+                    let _ = writeln!(out, "  timer: virtual timer on interrupt {intid}, one-shot deadlines{}; self-test: slept {us} us, {}",
+                        if timer::self_synchronised() { ", counter read through CNTVCTSS" } else { "" },
+                        if ok { "woken by its interrupt" } else { "FAILED (not woken by its interrupt)" });
+                }
+                None => {
+                    let _ = writeln!(out, "  timer: the GTDT names no interrupt for the virtual timer; waiting by reading the counter");
+                }
+            }
+        }
+        Some(Err(e)) => {
+            let _ = writeln!(out, "  interrupts: setting up the GIC failed: {e}; carrying on without interrupts");
+        }
+        None => {
+            let _ = writeln!(out, "  interrupts: no GIC in the MADT; carrying on without interrupts");
+        }
+    }
+
     // The kernel command line: deliberate faults on request, and how to end.
     let cmdline = CMDLINE.response().map_or("", |c| c.cmdline());
     let mut reboot_after = None;
@@ -250,6 +282,11 @@ extern "C" fn kmain(spsel_at_entry: u64) -> ! {
         }
     }
 
+    let (unexpected, last) = irq::unexpected();
+    if unexpected > 0 {
+        let _ = writeln!(out, "  {unexpected} interrupts arrived that nothing handles (the last was {last}); they are switched off");
+    }
+
     let Some(conduit) = conduit else {
         let _ = writeln!(out, "No PSCI in the FADT; halting.");
         halt()
@@ -258,8 +295,13 @@ extern "C" fn kmain(spsel_at_entry: u64) -> ! {
         // On the board: leave the output up for a while, then restart. The
         // one-time boot entry is used up by then, so Linux comes back.
         Some(secs) => {
-            let _ = writeln!(out, "Rebooting in {secs} seconds.");
-            timer::wait_seconds(secs);
+            // Count down in place: `\r` goes back to the start of the line.
+            let (start, freq) = (timer::now(), timer::frequency());
+            for left in (1..=secs).rev() {
+                let _ = write!(out, "\rRebooting in {left} s ");
+                timer::sleep_until(start + (secs + 1 - left) * freq);
+            }
+            let _ = writeln!(out, "\rRebooting now.      ");
             let error = psci::system_reset(conduit);
             let _ = writeln!(out, "The firmware refused to restart (PSCI error {error}); press the reset button.");
         }

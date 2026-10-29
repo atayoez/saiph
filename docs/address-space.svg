@@ -56,7 +56,7 @@
   <rect class="mapped" x="208.5" y="160.5" width="183" height="40"/>
   <text class="name mapped-t" x="300" y="185">Device registers</text>
   <text class="d1" x="408" y="177">window base + physical address</text>
-  <text class="d2" x="408" y="193">uncached; today only the serial port</text>
+  <text class="d2" x="408" y="193">uncached: the serial port and the GIC</text>
   <line class="tick" x1="198" y1="200.5" x2="208" y2="200.5"/>
   <text class="addr" x="194" y="204.5">0xffff_c000_0000_0000</text>
 

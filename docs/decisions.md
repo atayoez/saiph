@@ -81,6 +81,18 @@ whether the O6 supports them. The whole list was reviewed that way on
   Rust `SpinLockIrq`), so a lock that interrupt handlers use can't be taken
   with interrupts on. This replaced the `spin` crate (test-and-set, unfair,
   still on `lock_api` 0.4).
+- **Interrupts and timer** (2026-10-29): the GIC-700 through the GICv3
+  system-register interface (GICv5 is newer, but not on the O6). All
+  interrupts are group 1 with one priority, so handlers are never
+  interrupted; EOImode 0, which needs no workaround for GIC-700 erratum
+  2941627. Timer: the virtual timer, which at EL2 with VHE is the EL2
+  virtual timer (Linux's default since 2026), its interrupt taken from the
+  GTDT; tickless one-shot deadlines, the core sleeping in `wfi`; the
+  counter read through `CNTVCTSS_EL0` (FEAT_ECV) where the CPU has it.
+  Handlers do little and print nothing yet (the console has no lock).
+  Newer, not adopted yet: pseudo-NMIs through the priority mask (the O6 has
+  no FEAT_NMI), `wfet`/`wfit` for bounded waits, a timer wheel for many
+  timeouts, and threaded handlers once there is a scheduler.
 - **Physical memory**: a bitmap frame allocator. Newer, not adopted yet:
   LLFree (lock-free, per-core reservations), for when the other cores run.
 - **Users** (2026-10-28): single-user. No root, no user accounts, no logins.

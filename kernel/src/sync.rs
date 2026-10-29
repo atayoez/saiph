@@ -40,6 +40,18 @@ impl Guardian for IrqsOff {
     }
 }
 
+/// Interrupts stay as they are. Only for locks that interrupt handlers
+/// never take: taking one inside a handler panics, with a message, instead
+/// of perhaps waiting for itself forever.
+pub struct IrqsOn;
+
+impl Guardian for IrqsOn {
+    fn enter() {
+        assert!(!crate::irq::in_handler(), "an IrqsOn lock was taken in an interrupt handler");
+    }
+    fn exit() {}
+}
+
 /// A spin lock around a `T`; `G` says what happens to interrupts while it
 /// is held.
 pub type SpinLock<T, G> = lock_api::Mutex<TicketLock<G>, T>;
@@ -125,7 +137,7 @@ fn wait_for_change(word: &AtomicU32, old: u32) {
 ///
 /// The count belongs to the core; there is one core so far, and the count
 /// moves into per-core data when the other cores start.
-mod irqs {
+pub mod irqs {
     use super::*;
 
     static DEPTH: AtomicU32 = AtomicU32::new(0);
@@ -143,8 +155,9 @@ mod irqs {
 
     pub fn unmask() {
         if DEPTH.fetch_sub(1, Ordering::Relaxed) == 1 && WERE_ON.load(Ordering::Relaxed) {
-            // SAFETY: unmasks IRQs, as they were before the first lock.
-            unsafe { core::arch::asm!("msr DAIFClr, #2", options(nostack)) };
+            // SAFETY: unmasks IRQs, as they were before the first lock. The
+            // isb makes a pending interrupt arrive right here.
+            unsafe { core::arch::asm!("msr DAIFClr, #2", "isb", options(nostack)) };
         }
     }
 }

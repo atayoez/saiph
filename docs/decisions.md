@@ -3,6 +3,10 @@
 What has been decided for Saiph so far. In these docs "Orion" always means the
 board (Radxa Orion O6), never the OS.
 
+Every decision is checked against the newest alternatives first, including
+whether the O6 supports them. The whole list was reviewed that way on
+2026-10-29; "Newer, not adopted" notes what was found and why it waits.
+
 - **Name** (2026-10-28): Saiph, after κ Orionis, the star at Orion's knee.
 - **Licence** (2026-10-28): GPL-3.0-or-later for all of Saiph's own code
   (`LICENSE`). Linux is GPL-2.0-only, which cannot be combined with it, so
@@ -14,9 +18,18 @@ board (Radxa Orion O6), never the OS.
   is **bundled** (`limine/`: the official, signature-checked 12.9.6 release
   file plus its licences), so nobody has to install it. Later Saiph gets
   **its own UEFI loader** and stops depending on Limine; that only changes
-  the boot handover.
+  the boot handover. Reviewed 2026-10-29: 12.9.6, base revision 6 and the
+  `limine` crate 0.6.5 are the newest. The loader will be a small separate
+  crate on `aarch64-unknown-uefi` with `uefi` (0.41 at the time); nmbl and
+  UKIs are Linux-only.
 - **Target** (2026-10-28): `aarch64-unknown-none-softfloat` with `-Zbuild-std`
   and `-Zbranch-protection=bti,pac-ret`, on the newest nightly, unpinned.
+  No newer Armv9 target exists (2026-10-29), and Linux uses the same
+  branch-protection flags. **Since 2026-10-29 the code is compiled for
+  `cortex-a520`** (`-Ctarget-cpu`), the core type both of the O6's clusters
+  can run: LSE atomics, WFxT and the other Armv9.2 instructions the two
+  share. Newer, not adopted: GCS (`gcs`) and PAuth_LR (`pc`), which the O6
+  lacks.
 - **Build** (2026-10-28): Cargo-native, no scripts. Every command is a Cargo
   command: aliases in `.cargo/config.toml` (`cargo kernel`, `cargo board`,
   `cargo screenshot`, plus plain `cargo test`), each crate's own target
@@ -32,25 +45,52 @@ board (Radxa Orion O6), never the OS.
   `kernel/build.rs` renders it into letter images at build time. Ligatures
   are not drawn: the console draws one image per character.
 - **Unicode** (2026-10-28, requirement): the console must render text in
-  every script, with the newest Unicode version: full font coverage (a main
-  font plus fallbacks, like the Noto family), shaping (`rustybuzz`),
-  right-to-left text (`unicode-bidi`), grapheme clusters and wide characters.
+  every script, with the newest Unicode version (18.0 in September 2026):
+  full font coverage, shaping, right-to-left text, grapheme clusters and
+  wide characters. Planned stack (reviewed 2026-10-29): HarfRust for
+  shaping (rustybuzz is archived), ICU4X for segmentation and character
+  properties, `unicode-bidi` fed with ICU4X data, `unicode-width`, and
+  `skrifa` plus a rasterizer such as `zeno` for fonts loaded at runtime.
+  Fonts: Iosevka (actively released; Fira Code's last release was 2021),
+  then Sarasa Gothic for CJK, Noto per script, GNU Unifont as last resort.
   Text is UTF-8 throughout already. It builds on the kernel heap (there
   since 2026-10-29) and needs font files too big to compile in (Limine can
   load them as modules).
+- **Pages** (2026-10-29): **16 KiB**, not 4 KiB, like Apple's systems and
+  Android 15+: fewer TLB misses and table levels per byte, 32 MiB blocks.
+  Virtual addresses stay 48-bit (four levels), because Limine's direct map
+  starts at `0xffff_0000_0000_0000`. Frames are 16 KiB too.
+- **Switching page tables** (2026-10-29): the Linux way. The O6's cores have
+  FEAT_BBM level 2, which still allows a TLB conflict abort when old and new
+  tables map an address with different sizes (only BBML3, a 2025 extension,
+  rules that out). So the switch runs from a page identity-mapped through
+  TTBR0: turn TTBR1 walks off, flush the TLB, install the new tables.
 - **Kernel heap** (2026-10-29): [talc](https://github.com/SFBdragon/talc)
   5.1.1 does the allocating (`kernel/src/heap.rs`). The heap has its own
   region of addresses, from `0xffff_d000_0000_0000` (at most 1 TiB), and
   grows on demand: when talc runs out, the kernel takes frames from the
   frame allocator and maps them at the region's end, at least 2 MiB at a
-  time, so its frames need not be contiguous. It never shrinks yet. The
-  heap, the frame allocator and the running page tables are each behind a
-  spin lock from [spin](https://github.com/zesterer/spin-rs) 0.12.3. These
-  locks don't mask interrupts; that has to be solved before an interrupt
-  handler may allocate.
+  time, so its frames need not be contiguous. It never shrinks yet. Newer,
+  not adopted yet: per-core caches in front of it (Linux's "sheaves", 2025),
+  once there are several cores.
+- **Locks** (2026-10-29): Saiph's own ticket lock on `lock_api` 0.5, whose
+  per-acquisition guards are new in 0.5. A ticket lock is fair, so the
+  A520 cores can't be starved by the faster A720s; waiting cores sleep in
+  `wfe` until the lock word changes, as Linux does. The lock's *type* says
+  whether it masks interrupts while held (as in Asterinas and Linux 7.3's
+  Rust `SpinLockIrq`), so a lock that interrupt handlers use can't be taken
+  with interrupts on. This replaced the `spin` crate (test-and-set, unfair,
+  still on `lock_api` 0.4).
+- **Physical memory**: a bitmap frame allocator. Newer, not adopted yet:
+  LLFree (lock-free, per-core reservations), for when the other cores run.
 - **Users** (2026-10-28): single-user. No root, no user accounts, no logins.
   Programs stay isolated from each other and from the kernel; that protection
   just isn't organised around who is logged in. How programs get their rights
   is decided together with the kernel type.
 - **Kernel type:** not decided yet. It becomes binding with the syscall, IPC
   and user-mode design. The roadmap recommends a capability microkernel.
+  Newest options as of 2026-10-29: seL4 16.0 (AArch64 isolation proofs
+  complete, MCS scheduling contexts) and Asterinas's "framekernel" rule (all
+  `unsafe` code in one crate, parts verified with Verus). For program
+  rights: capabilities with rights masks; WASI 0.3 components for sandboxed
+  apps.

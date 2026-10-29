@@ -7,30 +7,34 @@
 //! - the direct map of RAM at Limine's HHDM offset, so every pointer we
 //!   already hold stays valid. Never executable; the kernel image's alias
 //!   in it is read-only;
-//! - a device window: device registers at DEVICE_WINDOW + physical address.
+//! - a device window: device registers at DEVICE_WINDOW + physical address;
+//! - the heap region (`heap::HEAP_BASE`), mapped page by page as the heap
+//!   grows, through `map`.
 //!
 //! The lower half (TTBR0) is switched off afterwards; it is for user space.
 
 use crate::{memory, screen};
-use frames::FrameAllocator;
 use limine::memmap;
 use paging::{Kind, MapError, Mapper, PAGE_SIZE, TableMemory};
+use spin::Mutex;
 
 /// Where device registers appear: this offset plus their physical address.
 /// Above the direct map (which ends below 0xffff_0100_0000_0000 for the O6's
 /// 40-bit physical addresses) and below the kernel image.
 pub const DEVICE_WINDOW: u64 = 0xffff_c000_0000_0000;
 
-/// Page-table memory for the kernel: frames from the allocator, reached
-/// through the direct map.
-struct KernelTables<'a, 'b> {
-    frames: &'a mut FrameAllocator<'b>,
+/// The tables the kernel runs on, once `switch_to` has switched to them.
+static RUNNING: Mutex<Option<Mapper<KernelTables>>> = Mutex::new(None);
+
+/// Page-table memory for the kernel: frames from the frame allocator,
+/// reached through the direct map.
+struct KernelTables {
     hhdm: u64,
 }
 
-impl TableMemory for KernelTables<'_, '_> {
+impl TableMemory for KernelTables {
     fn alloc_table(&mut self) -> Option<u64> {
-        let frame = self.frames.alloc()?;
+        let frame = memory::alloc_frame()?;
         // SAFETY: a frame we own, mapped by the direct map.
         unsafe { core::ptr::write_bytes((frame + self.hhdm) as *mut u8, 0, PAGE_SIZE as usize) };
         Some(frame)
@@ -64,6 +68,8 @@ pub enum Error {
     Map(MapError),
     /// The memory map has more regions than `build` has room for.
     TooManyRegions,
+    /// `map` was called before `switch_to`.
+    NotRunning,
 }
 
 impl core::fmt::Display for Error {
@@ -71,6 +77,7 @@ impl core::fmt::Display for Error {
         match self {
             Error::Map(e) => write!(f, "{e:?}"),
             Error::TooManyRegions => write!(f, "the memory map has too many regions"),
+            Error::NotRunning => write!(f, "the kernel's page tables are not in use yet"),
         }
     }
 }
@@ -89,14 +96,14 @@ pub struct Tables {
     pub blocks: usize,
     pub wx_violations: usize,
     pub uart: u64,
+    mapper: Mapper<KernelTables>,
 }
 
 /// Build the new tables (does not switch to them yet).
 /// `guard_code`: mark the code pages BTI-guarded (only for a kernel built
 /// with landing pads, see `protect::built_with_branch_protection`).
-pub fn build(frames: &mut FrameAllocator<'_>, hhdm: u64, virt_base: u64, phys_base: u64, uart_phys: u64, guard_code: bool) -> Result<Tables, Error> {
-    let mem = KernelTables { frames, hhdm };
-    let mut m = Mapper::new(mem).ok_or(MapError::OutOfMemory)?;
+pub fn build(hhdm: u64, virt_base: u64, phys_base: u64, uart_phys: u64, guard_code: bool) -> Result<Tables, Error> {
+    let mut m = Mapper::new(KernelTables { hhdm }).ok_or(MapError::OutOfMemory)?;
     let phys = |va: u64| va - virt_base + phys_base;
 
     // The kernel image, segment by segment. Each segment starts on a page
@@ -178,16 +185,17 @@ pub fn build(frames: &mut FrameAllocator<'_>, hhdm: u64, virt_base: u64, phys_ba
             wx += 1;
         }
     });
-    Ok(Tables { root: m.root, tables: m.tables, pages, blocks, wx_violations: wx, uart: DEVICE_WINDOW + uart_phys })
+    Ok(Tables { root: m.root, tables: m.tables, pages, blocks, wx_violations: wx, uart: DEVICE_WINDOW + uart_phys, mapper: m })
 }
 
-/// Switch the upper half to the tables at `root`.
+/// Switch the upper half to the tables `build` made, and keep them for
+/// `map`.
 ///
 /// The new tables map the running code, stack and data at the same
 /// addresses, so execution simply continues. Old and new tables may map
 /// the same address with different block sizes for a moment; the O6's
 /// cores (FEAT_BBM level 2) resolve that without a "TLB conflict" fault.
-pub fn switch_to(root: u64) {
+pub fn switch_to(tables: Tables) {
     // SAFETY: see above; the TLBI drops all of Limine's cached translations.
     unsafe {
         core::arch::asm!(
@@ -197,9 +205,24 @@ pub fn switch_to(root: u64) {
             "tlbi vmalle1",
             "dsb ish",
             "isb",
-            root = in(reg) root,
+            root = in(reg) tables.root,
         )
     };
+    *RUNNING.lock() = Some(tables.mapper);
+}
+
+/// Map `len` bytes at virtual `va` to physical `pa` in the tables the
+/// kernel is running on, where nothing is mapped yet.
+pub fn map(va: u64, pa: u64, len: u64, kind: Kind) -> Result<(), Error> {
+    let mut running = RUNNING.lock();
+    let m = running.as_mut().ok_or(Error::NotRunning)?;
+    m.map(va, pa, len, kind)?;
+    // The new descriptors replace invalid ones, and the TLB never keeps
+    // invalid ones, so there is nothing to invalidate. The barriers make
+    // the writes visible to the MMU before anything uses the addresses.
+    // SAFETY: barriers only.
+    unsafe { core::arch::asm!("dsb ishst", "isb") };
+    Ok(())
 }
 
 /// Stop translating lower-half addresses (TCR.EPD0): any access there now

@@ -35,8 +35,19 @@ board (Radxa Orion O6), never the OS.
   every script, with the newest Unicode version: full font coverage (a main
   font plus fallbacks, like the Noto family), shaping (`rustybuzz`),
   right-to-left text (`unicode-bidi`), grapheme clusters and wide characters.
-  Text is UTF-8 throughout already. This needs a kernel heap first, and font
-  files too big to compile in (Limine can load them as modules).
+  Text is UTF-8 throughout already. It builds on the kernel heap (there
+  since 2026-10-29) and needs font files too big to compile in (Limine can
+  load them as modules).
+- **Kernel heap** (2026-10-29): [talc](https://github.com/SFBdragon/talc)
+  5.1.1 does the allocating (`kernel/src/heap.rs`). The heap has its own
+  region of addresses, from `0xffff_d000_0000_0000` (at most 1 TiB), and
+  grows on demand: when talc runs out, the kernel takes frames from the
+  frame allocator and maps them at the region's end, at least 2 MiB at a
+  time, so its frames need not be contiguous. It never shrinks yet. The
+  heap, the frame allocator and the running page tables are each behind a
+  spin lock from [spin](https://github.com/zesterer/spin-rs) 0.12.3. These
+  locks don't mask interrupts; that has to be solved before an interrupt
+  handler may allocate.
 - **Users** (2026-10-28): single-user. No root, no user accounts, no logins.
   Programs stay isolated from each other and from the kernel; that protection
   just isn't organised around who is logged in. How programs get their rights

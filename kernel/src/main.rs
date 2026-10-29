@@ -1,14 +1,18 @@
 //! The Saiph kernel, early days: Limine loads it; it sets up its consoles
-//! (screen and serial), exceptions, PAC and BTI, physical memory and its own
-//! page tables, then powers the machine off, or reboots it after a wait
-//! when the command line says `reboot-after=<seconds>` (as on the board).
+//! (screen and serial), exceptions, PAC and BTI, physical memory, its own
+//! page tables and a heap, then powers the machine off, or reboots it after
+//! a wait when the command line says `reboot-after=<seconds>` (as on the
+//! board).
 
 #![no_std]
 #![no_main]
 
+extern crate alloc;
+
 mod acpi;
 mod console;
 mod exceptions;
+mod heap;
 mod memory;
 mod mmu;
 mod protect;
@@ -180,15 +184,15 @@ extern "C" fn kmain(spsel_at_entry: u64) -> ! {
     }
 
     // Physical memory.
-    let Some(mut frames) = memory::init(&mut out, hhdm.offset) else {
+    if !memory::init(&mut out, hhdm.offset) {
         let _ = writeln!(out, "No usable memory map from Limine; halting.");
         halt()
-    };
-    memory::self_test(&mut out, &mut frames, hhdm.offset);
+    }
+    memory::self_test(&mut out, hhdm.offset);
 
     // Our own page tables: build, switch, move the console into the device
     // window, then switch off the lower half (reserved for user space).
-    let kernel_tables = match vm::build(&mut frames, hhdm.offset, exe.virtual_base, exe.physical_base, uart_phys, protected) {
+    let kernel_tables = match vm::build(hhdm.offset, exe.virtual_base, exe.physical_base, uart_phys, protected) {
         Ok(t) => t,
         Err(e) => {
             let _ = writeln!(out, "Building page tables failed: {e}; halting.");
@@ -197,10 +201,14 @@ extern "C" fn kmain(spsel_at_entry: u64) -> ! {
     };
     let _ = writeln!(out, "  page tables built: {} tables, {} pages + {} blocks of 2 MiB, {} W^X violations",
         kernel_tables.tables, kernel_tables.pages, kernel_tables.blocks, kernel_tables.wx_violations);
-    vm::switch_to(kernel_tables.root);
-    uart::set_console(kernel_tables.uart);
+    let uart = kernel_tables.uart;
+    vm::switch_to(kernel_tables);
+    uart::set_console(uart);
     vm::disable_lower_half();
-    let _ = writeln!(out, "  running on our own page tables; console now at {:#x}; lower half off", kernel_tables.uart);
+    let _ = writeln!(out, "  running on our own page tables; console now at {uart:#x}; lower half off");
+
+    // The heap grows in its own region of these tables.
+    heap::self_test(&mut out);
 
     // The kernel command line: deliberate faults on request, and how to end.
     let cmdline = CMDLINE.response().map_or("", |c| c.cmdline());

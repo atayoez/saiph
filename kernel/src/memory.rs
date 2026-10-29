@@ -4,6 +4,23 @@ use core::fmt::Write;
 use frames::{FRAME_SIZE, FrameAllocator, words_for};
 use limine::memmap::{self, Entry};
 use limine::request::MemmapRequest;
+use spin::Mutex;
+
+/// The frame allocator, once `init` has set it up. The page tables (`vm`)
+/// and the heap take their frames from here.
+pub static FRAMES: Mutex<Option<FrameAllocator<'static>>> = Mutex::new(None);
+
+/// One free frame, if there is one.
+pub fn alloc_frame() -> Option<u64> {
+    FRAMES.lock().as_mut()?.alloc()
+}
+
+/// Give back a frame from `alloc_frame`.
+pub fn free_frame(frame: u64) {
+    if let Some(fa) = FRAMES.lock().as_mut() {
+        let _ = fa.free(frame);
+    }
+}
 
 #[used]
 #[unsafe(link_section = ".requests")]
@@ -29,10 +46,15 @@ fn type_name(t: u64) -> &'static str {
     }
 }
 
-/// Print the memory map by type, then set up the frame allocator over all
-/// usable and bootloader-reclaimable memory (the latter stays marked in use
-/// until we stop needing Limine's page tables and stack).
-pub fn init(out: &mut impl Write, hhdm: u64) -> Option<FrameAllocator<'static>> {
+/// Print the memory map by type, then set up the frame allocator (`FRAMES`)
+/// over all usable and bootloader-reclaimable memory (the latter stays
+/// marked in use until we stop needing Limine's page tables and stack).
+/// False if Limine sent no usable memory map.
+pub fn init(out: &mut impl Write, hhdm: u64) -> bool {
+    set_up(out, hhdm).is_some()
+}
+
+fn set_up(out: &mut impl Write, hhdm: u64) -> Option<()> {
     let entries: &[&Entry] = MEMMAP.response()?.entries();
 
     let _ = writeln!(out, "  memory map: {} regions", entries.len());
@@ -64,12 +86,15 @@ pub fn init(out: &mut impl Write, hhdm: u64) -> Option<FrameAllocator<'static>> 
     fa.mark_used(home.base, bytes);
     let _ = writeln!(out, "  frame allocator: {low:#x}..{high:#x} ({frames} frames), bitmap {} KiB at {:#x}, {} frames ({} MiB) free",
         bytes.div_ceil(1024), home.base, fa.free_frames(), fa.free_frames() as u64 * FRAME_SIZE >> 20);
-    Some(fa)
+    *FRAMES.lock() = Some(fa);
+    Some(())
 }
 
 /// Allocate a few frames, write and read them through the direct map, give
 /// them back, and check that nothing went missing.
-pub fn self_test(out: &mut impl Write, fa: &mut FrameAllocator<'_>, hhdm: u64) -> bool {
+pub fn self_test(out: &mut impl Write, hhdm: u64) -> bool {
+    let mut frames = FRAMES.lock();
+    let Some(fa) = frames.as_mut() else { return false };
     let before = fa.free_frames();
     let mut ok = true;
     let mut singles = [0u64; 3];

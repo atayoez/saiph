@@ -19,7 +19,7 @@ A learning and research OS for one Armv9 board, built in small steps. UEFI and L
 </div>
 
 > [!NOTE]
-> Saiph is at the very beginning. It boots, sets up its consoles, exception handling, memory protection and page tables, then powers off or restarts. There is no scheduler, no user space and no driver beyond the console yet. It runs in QEMU and on the real Orion O6.
+> Saiph is at the very beginning. It boots, sets up its consoles, exception handling, memory protection, page tables and a heap, then powers off or restarts. There is no scheduler, no user space and no driver beyond the console yet. It runs in QEMU and on the real Orion O6.
 
 ## What works
 
@@ -29,6 +29,7 @@ A learning and research OS for one Armv9 board, built in small steps. UEFI and L
 - **Pointer authentication and BTI.** Return addresses are signed with a key from Limine's entropy, and kernel code only accepts branches to landing pads.
 - **Physical memory**: a bitmap frame allocator over Limine's memory map.
 - **Its own page tables**: each part of the kernel mapped W^X, all RAM in a direct map built mostly from 2 MiB blocks, a window for device registers, and the lower half switched off for future user programs.
+- **A kernel heap** for `Box`, `Vec` and `String`, run by [talc](https://github.com/SFBdragon/talc). It lives in an address range of its own and grows on demand: when it runs out, the kernel maps more frames at its end, at least 2 MiB at a time.
 - **Power off or reboot** through PSCI.
 - **Deliberate faults on request** (`fault-test`, `pac-test`, `bti-test`, `wx-test`) that show each protection is enforced by the hardware, not just configured.
 
@@ -37,7 +38,7 @@ A learning and research OS for one Armv9 board, built in small steps. UEFI and L
 - [x] Boot, consoles, exceptions, PAC and BTI
 - [x] Frame allocator and its own page tables
 - [x] First boot on the Orion O6
-- [ ] Kernel heap
+- [x] Kernel heap
 - [ ] Timer and interrupts (GIC-700)
 - [ ] All 12 cores
 - [ ] System calls, IPC and user programs (the kernel's design is decided here)
@@ -101,11 +102,11 @@ This copies Limine and the kernel to `\EFI\saiph` on the EFI system partition an
 
 ## How it works
 
-<p align="center"><img src="docs/boot-flow.svg" width="800" alt="Boot chain: UEFI firmware, systemd-boot, Limine, Saiph. Inside the kernel: consoles, exceptions, PAC and BTI, frame allocator, page tables, power off"></p>
+<p align="center"><img src="docs/boot-flow.svg" width="800" alt="Boot chain: UEFI firmware, systemd-boot, Limine, Saiph. Inside the kernel: consoles, exceptions, PAC and BTI, frame allocator, page tables, heap, power off"></p>
 
-The firmware starts systemd-boot, which starts Limine for one boot; Limine loads the kernel ELF into the upper half of the address space. The kernel brings up its consoles first, so that even an early failure is visible, then exception handling, pointer authentication and BTI, physical memory and finally its own page tables:
+The firmware starts systemd-boot, which starts Limine for one boot; Limine loads the kernel ELF into the upper half of the address space. The kernel brings up its consoles first, so that even an early failure is visible, then exception handling, pointer authentication and BTI, physical memory, its own page tables and finally the heap:
 
-<p align="center"><img src="docs/address-space.svg" width="800" alt="Virtual address space: kernel image, device window, direct map of RAM, invalid addresses, and the switched-off lower half"></p>
+<p align="center"><img src="docs/address-space.svg" width="800" alt="Virtual address space: kernel image, kernel heap, device window, direct map of RAM, invalid addresses, and the switched-off lower half"></p>
 
 - **Branch protection everywhere.** Saiph is built for `aarch64-unknown-none-softfloat` with `-Zbuild-std` and `-Zbranch-protection=bti,pac-ret`, so `core` and every other crate it uses are compiled with signed return addresses and landing pads, not just the kernel's own code.
 - **W^X by construction.** The [`paging`](paging) crate has no way to ask for a page that is both writable and executable, and the kernel checks every mapping after building its tables.
@@ -134,6 +135,7 @@ Questions and ideas are welcome in [Issues](https://github.com/atayoez/saiph/iss
 ## Credits
 
 - [Limine](https://github.com/limine-bootloader/limine) boots Saiph; a copy of its official release is bundled in [`limine/`](limine). The [limine](https://crates.io/crates/limine) crate describes its boot protocol.
+- The kernel heap is [talc](https://github.com/SFBdragon/talc) by Shaun Beautement, behind a lock from [spin](https://github.com/zesterer/spin-rs).
 - The console font is [Fira Code](https://github.com/tonsky/FiraCode) by The Fira Code Project Authors, rendered at build time with [fontdue](https://github.com/mooman219/fontdue).
 - The hardware probe was built on [uefi-rs](https://github.com/rust-osdev/uefi-rs).
 - The roadmap draws on [seL4](https://sel4.systems), [Redox](https://www.redox-os.org), [Asterinas](https://asterinas.github.io), [Hubris](https://hubris.oxide.computer) and [Managarm](https://managarm.org), and the hardware knowledge on documentation, schematics and ACPI sources published by Radxa and CIX.

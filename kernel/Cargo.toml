@@ -15,6 +15,10 @@ forced-target = "aarch64-unknown-none-softfloat"
 limine = "0.6"
 frames = { path = "../frames" }
 paging = { path = "../paging" }
+# The kernel heap's allocator (see src/heap.rs).
+talc = "5.1"
+# Spin locks: around the heap, the frame allocator and the page tables.
+spin = { version = "0.12", default-features = false, features = ["spin_mutex", "lock_api"] }
 
 [build-dependencies]
 # Renders the console font (fonts/) into letter images at build time.

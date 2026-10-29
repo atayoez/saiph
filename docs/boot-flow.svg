@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 206" width="800" height="206" role="img" aria-labelledby="title desc">
   <title id="title">How Saiph boots</title>
-  <desc id="desc">The UEFI firmware starts systemd-boot, which starts Limine once, which loads the Saiph kernel. The kernel then sets up its consoles, exception handling, PAC and BTI, the frame allocator and its own page tables, and finally powers off or reboots.</desc>
+  <desc id="desc">The UEFI firmware starts systemd-boot, which starts Limine once, which loads the Saiph kernel. The kernel then sets up its consoles, exception handling, PAC and BTI, the frame allocator, its own page tables and the heap, and finally powers off or reboots.</desc>
   <style>
     text { font-family: ui-sans-serif, -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; text-anchor: middle; }
     .label { font-size: 12px; fill: #59636e; text-anchor: start; }
@@ -48,32 +48,37 @@
   <text class="ms" x="712" y="70">higher half, EL2 + VHE</text>
 
   <text class="label" x="0" y="129">Inside the kernel, in order</text>
-  <rect class="box" x="0.5" y="138.5" width="119" height="63" rx="8"/>
-  <text class="bt2" x="60" y="166">Consoles</text>
-  <text class="bs" x="60" y="186">screen + serial</text>
-  <polygon class="head" points="134,170 125,165 125,175"/>
+  <rect class="box" x="0.5" y="138.5" width="104" height="63" rx="8"/>
+  <text class="bt2" x="52" y="166">Consoles</text>
+  <text class="bs" x="52" y="186">screen + serial</text>
+  <polygon class="head" points="114,170 106,165 106,175"/>
 
-  <rect class="box" x="136.5" y="138.5" width="119" height="63" rx="8"/>
-  <text class="bt2" x="196" y="166">Exceptions</text>
-  <text class="bs" x="196" y="186">fault reports</text>
-  <polygon class="head" points="270,170 261,165 261,175"/>
+  <rect class="box" x="116.5" y="138.5" width="104" height="63" rx="8"/>
+  <text class="bt2" x="168" y="166">Exceptions</text>
+  <text class="bs" x="168" y="186">fault reports</text>
+  <polygon class="head" points="230,170 222,165 222,175"/>
 
-  <rect class="box" x="272.5" y="138.5" width="119" height="63" rx="8"/>
-  <text class="bt2" x="332" y="166">PAC + BTI</text>
-  <text class="bs" x="332" y="186">signed returns</text>
-  <polygon class="head" points="406,170 397,165 397,175"/>
+  <rect class="box" x="232.5" y="138.5" width="104" height="63" rx="8"/>
+  <text class="bt2" x="284" y="166">PAC + BTI</text>
+  <text class="bs" x="284" y="186">signed returns</text>
+  <polygon class="head" points="346,170 338,165 338,175"/>
 
-  <rect class="box" x="408.5" y="138.5" width="119" height="63" rx="8"/>
-  <text class="bt2" x="468" y="166">Frame allocator</text>
-  <text class="bs" x="468" y="186">one bit per 4 KiB</text>
-  <polygon class="head" points="542,170 533,165 533,175"/>
+  <rect class="box" x="348.5" y="138.5" width="104" height="63" rx="8"/>
+  <text class="bt2" x="400" y="166">Frames</text>
+  <text class="bs" x="400" y="186">4 KiB each</text>
+  <polygon class="head" points="462,170 454,165 454,175"/>
 
-  <rect class="box" x="544.5" y="138.5" width="119" height="63" rx="8"/>
-  <text class="bt2" x="604" y="166">Page tables</text>
-  <text class="bs" x="604" y="186">its own, W^X</text>
-  <polygon class="head" points="678,170 669,165 669,175"/>
+  <rect class="box" x="464.5" y="138.5" width="104" height="63" rx="8"/>
+  <text class="bt2" x="516" y="166">Page tables</text>
+  <text class="bs" x="516" y="186">its own, W^X</text>
+  <polygon class="head" points="578,170 570,165 570,175"/>
 
-  <rect class="main" x="680.5" y="138.5" width="119" height="63" rx="8"/>
-  <text class="mt" x="740" y="166">Power off</text>
-  <text class="ms" x="740" y="186">or reboot (PSCI)</text>
+  <rect class="box" x="580.5" y="138.5" width="104" height="63" rx="8"/>
+  <text class="bt2" x="632" y="166">Heap</text>
+  <text class="bs" x="632" y="186">talc, grows</text>
+  <polygon class="head" points="694,170 686,165 686,175"/>
+
+  <rect class="main" x="696.5" y="138.5" width="104" height="63" rx="8"/>
+  <text class="mt" x="748" y="166">Power off</text>
+  <text class="ms" x="748" y="186">or reboot (PSCI)</text>
 </svg>

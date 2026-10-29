@@ -13,7 +13,7 @@
 //!
 //! The lower half (TTBR0) is switched off afterwards; it is for user space.
 
-use crate::{memory, screen};
+use crate::{memory, mmu, screen};
 use limine::memmap;
 use paging::{Kind, MapError, Mapper, PAGE_SIZE, TableMemory};
 use spin::Mutex;
@@ -70,6 +70,8 @@ pub enum Error {
     TooManyRegions,
     /// `map` was called before `switch_to`.
     NotRunning,
+    /// The page that switches tables could not be mapped in the lower half.
+    Trampoline,
 }
 
 impl core::fmt::Display for Error {
@@ -78,6 +80,7 @@ impl core::fmt::Display for Error {
             Error::Map(e) => write!(f, "{e:?}"),
             Error::TooManyRegions => write!(f, "the memory map has too many regions"),
             Error::NotRunning => write!(f, "the kernel's page tables are not in use yet"),
+            Error::Trampoline => write!(f, "could not map the table switch at its physical address"),
         }
     }
 }
@@ -97,6 +100,8 @@ pub struct Tables {
     pub wx_violations: usize,
     pub uart: u64,
     mapper: Mapper<KernelTables>,
+    /// Physical (= lower-half virtual) address of `saiph_switch_tables`.
+    trampoline: u64,
 }
 
 /// Build the new tables (does not switch to them yet).
@@ -185,29 +190,67 @@ pub fn build(hhdm: u64, virt_base: u64, phys_base: u64, uart_phys: u64, guard_co
             wx += 1;
         }
     });
-    Ok(Tables { root: m.root, tables: m.tables, pages, blocks, wx_violations: wx, uart: DEVICE_WINDOW + uart_phys, mapper: m })
+    // The switch runs from its physical address, mapped in the lower half.
+    let trampoline = phys(saiph_switch_tables as *const () as u64);
+    if !mmu::map_identity_code(trampoline, phys) {
+        return Err(Error::Trampoline);
+    }
+    Ok(Tables { root: m.root, tables: m.tables, pages, blocks, wx_violations: wx, uart: DEVICE_WINDOW + uart_phys, mapper: m, trampoline })
+}
+
+// Switching the upper half from Limine's tables to ours, break-before-make
+// style. Simply loading TTBR1 is not safe: for a moment the TLB could hold
+// an old and a new translation of the same address with different block
+// sizes, and the architecture allows a "TLB conflict" fault then (only
+// cores with FEAT_BBML3, a 2025 extension, promise not to; the O6's have
+// BBM level 2). So, like Linux, this code runs from its identity mapping in
+// the lower half, where nothing changes: it turns translation through TTBR1
+// off (TCR.EPD1), drops every cached translation, then installs the new
+// tables and the new TCR, and returns to the caller in the upper half.
+// It must not touch the stack or anything else in the upper half.
+//
+// saiph_switch_tables(root: x0, tcr: x1)
+core::arch::global_asm!(
+    ".section .text.trampoline, \"ax\"",
+    ".balign 4096",
+    ".global saiph_switch_tables",
+    "saiph_switch_tables:",
+    "bti c",
+    "mrs x2, TCR_EL1",
+    "orr x2, x2, #(1 << 23)", // EPD1: no more walks through TTBR1
+    "msr TCR_EL1, x2",
+    "isb",
+    "tlbi vmalle1",           // forget every cached translation
+    "dsb ish",
+    "isb",
+    "msr TTBR1_EL1, x0",
+    "msr TCR_EL1, x1",        // the new TCR, with EPD1 clear again
+    "isb",
+    "tlbi vmalle1",           // in case TCR fields were cached
+    "dsb ish",
+    "isb",
+    "ret",
+);
+
+unsafe extern "C" {
+    fn saiph_switch_tables(root: u64, tcr: u64);
 }
 
 /// Switch the upper half to the tables `build` made, and keep them for
-/// `map`.
-///
-/// The new tables map the running code, stack and data at the same
-/// addresses, so execution simply continues. Old and new tables may map
-/// the same address with different block sizes for a moment; the O6's
-/// cores (FEAT_BBM level 2) resolve that without a "TLB conflict" fault.
+/// `map`. The new tables map the running code, stack and data at the same
+/// addresses, so execution simply continues.
 pub fn switch_to(tables: Tables) {
-    // SAFETY: see above; the TLBI drops all of Limine's cached translations.
+    let tcr: u64;
+    // SAFETY: reading TCR has no side effects.
+    unsafe { core::arch::asm!("mrs {}, TCR_EL1", out(reg) tcr) };
+    // SAFETY: `trampoline` is saiph_switch_tables at its identity mapping
+    // (see `build`); the tables are complete; the DSB makes them visible
+    // to the table walker first.
     unsafe {
-        core::arch::asm!(
-            "dsb ishst",
-            "msr TTBR1_EL1, {root}",
-            "isb",
-            "tlbi vmalle1",
-            "dsb ish",
-            "isb",
-            root = in(reg) tables.root,
-        )
-    };
+        core::arch::asm!("dsb ishst");
+        let switch: unsafe extern "C" fn(u64, u64) = core::mem::transmute(tables.trampoline as usize);
+        switch(tables.root, tcr & !(1 << 23));
+    }
     *RUNNING.lock() = Some(tables.mapper);
 }
 

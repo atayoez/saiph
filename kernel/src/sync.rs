@@ -135,26 +135,27 @@ fn wait_for_change(word: &AtomicU32, old: u32) {
 /// released, and only if they were on before the first one was taken, in
 /// whatever order the locks are released.
 ///
-/// The count belongs to the core; there is one core so far, and the count
-/// moves into per-core data when the other cores start.
+/// Each core keeps its own count.
 pub mod irqs {
     use super::*;
 
-    static DEPTH: AtomicU32 = AtomicU32::new(0);
-    static WERE_ON: AtomicBool = AtomicBool::new(false);
+    crate::cpu_local! {
+        static DEPTH: AtomicU32 = AtomicU32::new(0);
+        static WERE_ON: AtomicBool = AtomicBool::new(false);
+    }
 
     pub fn mask() {
         let daif: u64;
         // SAFETY: masks IRQs (DAIF.I, bit 7) on this core; the old state is kept.
         unsafe { core::arch::asm!("mrs {}, DAIF", "msr DAIFSet, #2", out(reg) daif, options(nostack)) };
         // Interrupts are off now, so nothing else runs on this core in between.
-        if DEPTH.fetch_add(1, Ordering::Relaxed) == 0 {
-            WERE_ON.store(daif & (1 << 7) == 0, Ordering::Relaxed);
+        if DEPTH.get().fetch_add(1, Ordering::Relaxed) == 0 {
+            WERE_ON.get().store(daif & (1 << 7) == 0, Ordering::Relaxed);
         }
     }
 
     pub fn unmask() {
-        if DEPTH.fetch_sub(1, Ordering::Relaxed) == 1 && WERE_ON.load(Ordering::Relaxed) {
+        if DEPTH.get().fetch_sub(1, Ordering::Relaxed) == 1 && WERE_ON.get().load(Ordering::Relaxed) {
             // SAFETY: unmasks IRQs, as they were before the first lock. The
             // isb makes a pending interrupt arrive right here.
             unsafe { core::arch::asm!("msr DAIFClr, #2", "isb", options(nostack)) };

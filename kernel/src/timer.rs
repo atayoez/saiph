@@ -21,8 +21,10 @@ const ENABLE: u64 = 1;
 static INTID: AtomicU32 = AtomicU32::new(0);
 /// The CPU has FEAT_ECV, so the counter can be read without a barrier.
 static ECV: AtomicBool = AtomicBool::new(false);
-/// How often the timer's interrupt has arrived.
-static FIRED: AtomicU32 = AtomicU32::new(0);
+crate::cpu_local! {
+    /// How often this core's timer interrupt has arrived.
+    static FIRED: AtomicU32 = AtomicU32::new(0);
+}
 
 pub fn frequency() -> u64 {
     let f: u64;
@@ -50,7 +52,7 @@ pub fn now() -> u64 {
 fn fired() {
     // SAFETY: turns this core's virtual timer off.
     unsafe { core::arch::asm!("msr CNTV_CTL_EL0, xzr", "isb") };
-    FIRED.fetch_add(1, Ordering::Relaxed);
+    FIRED.get().fetch_add(1, Ordering::Relaxed);
 }
 
 /// Take the timer's interrupt `intid` from now on.
@@ -74,7 +76,7 @@ pub fn self_synchronised() -> bool {
 
 /// How often the timer's interrupt has arrived so far.
 pub fn interrupts() -> u32 {
-    FIRED.load(Ordering::Relaxed)
+    FIRED.get().load(Ordering::Relaxed)
 }
 
 /// Sleep until the counter reaches `deadline`.

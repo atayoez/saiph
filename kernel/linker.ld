@@ -43,6 +43,12 @@ SECTIONS
         __data_start = .;
         *(.data .data.*)
     } :data
+    /* Per-core variables (cpu_local!, see src/percpu.rs). */
+    .cpu_local : ALIGN(64) {
+        __cpu_local_start = .;
+        KEEP(*(.cpu_local))
+        __cpu_local_end = .;
+    } :data
     .bss : { *(.bss .bss.*) *(COMMON) } :data
     __kernel_end = .;
 

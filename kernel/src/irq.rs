@@ -7,8 +7,7 @@
 //! interrupted code had, so handlers are never interrupted themselves.
 //!
 //! Handlers run on the core's exception stack (see stacks.rs), in the
-//! middle of whatever the core was doing. So they do little, and they don't
-//! print: the console has no lock yet.
+//! middle of whatever the core was doing. So they do little.
 
 use crate::gic;
 use crate::sync::{IrqsOff, SpinLock};
@@ -19,15 +18,17 @@ use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 type Handlers = [Option<fn()>; 32];
 /// Interrupt handlers look into it, so it is an `IrqsOff` lock.
 static HANDLERS: SpinLock<Handlers, IrqsOff> = SpinLock::new([None; 32]);
-/// How many handlers are running on this core (one core so far).
-static IN_HANDLER: AtomicU32 = AtomicU32::new(0);
+crate::cpu_local! {
+    /// How many handlers are running on this core.
+    static IN_HANDLER: AtomicU32 = AtomicU32::new(0);
+}
 /// Interrupts that arrived without a handler, and the last one's number.
 static UNEXPECTED: AtomicU32 = AtomicU32::new(0);
 static LAST_UNEXPECTED: AtomicU32 = AtomicU32::new(0);
 
 /// True inside an interrupt handler.
 pub fn in_handler() -> bool {
-    IN_HANDLER.load(Ordering::Relaxed) != 0
+    IN_HANDLER.get().load(Ordering::Relaxed) != 0
 }
 
 /// Run `handler` whenever interrupt `intid` (0-31) arrives.
@@ -45,7 +46,7 @@ pub fn unmask() {
 
 /// Called by the exception vector for every IRQ.
 pub fn handle() {
-    IN_HANDLER.fetch_add(1, Ordering::Relaxed);
+    IN_HANDLER.get().fetch_add(1, Ordering::Relaxed);
     loop {
         let intid = gic::acknowledge();
         if (1020..1024).contains(&intid) {
@@ -63,7 +64,7 @@ pub fn handle() {
         }
         gic::end_of_interrupt(intid);
     }
-    IN_HANDLER.fetch_sub(1, Ordering::Relaxed);
+    IN_HANDLER.get().fetch_sub(1, Ordering::Relaxed);
 }
 
 /// Interrupts that arrived without a handler: (count, last one's number).

@@ -17,6 +17,7 @@ mod heap;
 mod irq;
 mod memory;
 mod mmu;
+mod percpu;
 mod protect;
 mod psci;
 mod screen;
@@ -105,6 +106,8 @@ pub fn halt() -> ! {
 extern "C" fn kmain(spsel_at_entry: u64) -> ! {
     // Without a supported protocol nothing Limine sent can be trusted, and
     // there is no console yet to say so.
+    // Per-core variables first: the locks use them, and the console has one.
+    percpu::init_boot_core();
     if !BASE_REVISION.is_supported() {
         halt();
     }
@@ -362,6 +365,6 @@ fn recurse(depth: u64) -> u64 {
 
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
-    let _ = writeln!(Console, "\nkernel panic: {info}");
+    let _ = writeln!(console::Raw, "\nkernel panic: {info}");
     halt()
 }

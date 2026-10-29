@@ -11,7 +11,7 @@
 //! IRQs go on to `irq::handle`; everything else unexpected is reported.
 //! The `_EL1` register names reach the EL2 registers under VHE.
 
-use crate::console::Console;
+use crate::console::Raw;
 use core::fmt::Write;
 use core::sync::atomic::{AtomicU8, Ordering};
 
@@ -218,13 +218,13 @@ extern "C" fn saiph_exception(slot: u64, frame: &mut Frame) {
     let ec = (frame.esr >> 26) & 0x3f;
     let synchronous = slot & 3 == 0;
     if synchronous && ec == 0x3c && frame.esr & 0xffff == SELF_TEST as u64 {
-        let _ = writeln!(Console, "  exception self-test: brk #{SELF_TEST:#x} at {:#x} handled, resuming", frame.elr);
+        let _ = writeln!(Raw, "  exception self-test: brk #{SELF_TEST:#x} at {:#x} handled, resuming", frame.elr);
         frame.elr += 4; // continue after the brk instruction
         REPORTING.store(0, Ordering::Relaxed);
         return;
     }
 
-    let mut out = Console;
+    let mut out = Raw;
     let (kind, from) = origin(slot);
     let _ = writeln!(out, "\n*** unexpected {kind} from {from}");
     let _ = writeln!(out, "    cause: {} (ESR={:#x}, class {ec:#04x})", class(ec), frame.esr);

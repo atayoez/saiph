@@ -60,9 +60,12 @@ const PRIORITY: u8 = 0xa0;
 /// Size of the distributor's register block.
 const DISTRIBUTOR_SIZE: u64 = 64 * 1024;
 
-/// The distributor and this core's SGI frame, mapped (0 = not yet).
+/// The distributor, mapped (0 = not yet).
 static DISTRIBUTOR: AtomicU64 = AtomicU64::new(0);
-static SGI_BASE: AtomicU64 = AtomicU64::new(0);
+crate::cpu_local! {
+    /// This core's SGI frame, mapped (0 = not yet).
+    static SGI_BASE: AtomicU64 = AtomicU64::new(0);
+}
 /// Read-modify-write changes to the configuration go one at a time. Only
 /// set-up code changes it, never an interrupt handler.
 static CONFIG: SpinLock<(), IrqsOn> = SpinLock::new(());
@@ -214,7 +217,7 @@ pub fn init(gic: &acpi::Gic) -> Result<Found, Error> {
     }
 
     DISTRIBUTOR.store(dist, Ordering::Relaxed);
-    SGI_BASE.store(sgi, Ordering::Release);
+    SGI_BASE.get().store(sgi, Ordering::Release);
     Ok(Found {
         arch: (read32(dist + GICD_PIDR2) >> 4) & 0xf,
         iidr: read32(dist + GICD_IIDR),
@@ -234,7 +237,7 @@ pub enum Trigger {
 
 /// Set how a private interrupt (PPI, 16-31) of this core signals.
 pub fn configure(intid: u32, trigger: Trigger) {
-    let sgi = SGI_BASE.load(Ordering::Acquire);
+    let sgi = SGI_BASE.get().load(Ordering::Acquire);
     if sgi == 0 || !(16..32).contains(&intid) {
         return;
     }
@@ -247,7 +250,7 @@ pub fn configure(intid: u32, trigger: Trigger) {
 /// Enable one of this core's private interrupts (SGI or PPI, 0-31).
 /// Shared interrupts (SPIs) come with the first device that needs one.
 pub fn enable(intid: u32) {
-    let sgi = SGI_BASE.load(Ordering::Acquire);
+    let sgi = SGI_BASE.get().load(Ordering::Acquire);
     if sgi != 0 && intid < 32 {
         // Write-1-to-set: no read-modify-write, so no lock needed.
         write32(sgi + GICR_ISENABLER0, 1 << intid);
@@ -256,7 +259,7 @@ pub fn enable(intid: u32) {
 
 /// Disable one of this core's private interrupts.
 pub fn disable(intid: u32) {
-    let sgi = SGI_BASE.load(Ordering::Acquire);
+    let sgi = SGI_BASE.get().load(Ordering::Acquire);
     if sgi != 0 && intid < 32 {
         write32(sgi + GICR_ICENABLER0, 1 << intid);
     }

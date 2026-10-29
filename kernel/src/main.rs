@@ -21,6 +21,7 @@ mod percpu;
 mod protect;
 mod psci;
 mod screen;
+mod smp;
 mod stacks;
 mod sync;
 mod timer;
@@ -133,6 +134,8 @@ extern "C" fn kmain(spsel_at_entry: u64) -> ! {
     let gic_info = tables.gic();
     let el = (mmu::read_current_el() >> 2) & 3;
     let timer_irq = tables.virtual_timer_interrupt(el == 2);
+    let mut mpidrs = [0; stacks::MAX_CORES];
+    let cores = tables.cores(&mut mpidrs);
 
     // Our page tables are statics inside the kernel image, so their
     // physical address is their offset from the kernel's start.
@@ -222,7 +225,15 @@ extern "C" fn kmain(spsel_at_entry: u64) -> ! {
     // From here on, kernel code runs on this core's own stack, with a
     // guard page below it, and exceptions on a separate one (stacks.rs).
     // Limine's stack stays behind, holding `later`; it is never reused.
-    let later = Later { gic: gic_info, timer_irq, conduit };
+    let later = Later {
+        gic: gic_info,
+        timer_irq,
+        conduit,
+        mpidrs,
+        cores,
+        hhdm: hhdm.offset,
+        kernel: (exe.virtual_base, exe.physical_base),
+    };
     match stacks::allocate(0) {
         Ok(stacks) => {
             let _ = writeln!(out, "  stacks: moving to this core's kernel stack (top {:#x}) and exception stack (top {:#x}), each above a guard page",
@@ -241,6 +252,12 @@ struct Later {
     gic: Option<acpi::Gic>,
     timer_irq: Option<(u32, bool)>,
     conduit: Option<psci::Conduit>,
+    /// The cores in the MADT (MPIDR affinity values).
+    mpidrs: [u64; stacks::MAX_CORES],
+    cores: usize,
+    hhdm: u64,
+    /// The kernel's virtual and physical base addresses.
+    kernel: (u64, u64),
 }
 
 /// The rest of the boot, on this core's own stacks.
@@ -268,6 +285,11 @@ extern "C" fn continue_boot(later: usize) -> ! {
                 None => {
                     let _ = writeln!(out, "  timer: the GTDT names no interrupt for the virtual timer; waiting by reading the counter");
                 }
+            }
+            // The other cores.
+            if let Some(conduit) = later.conduit {
+                let (virt, phys) = later.kernel;
+                smp::start_all(&mut out, &later.mpidrs[..later.cores], conduit, later.hhdm, |va| va - virt + phys);
             }
         }
         Some(Err(e)) => {

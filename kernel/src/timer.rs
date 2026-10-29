@@ -55,18 +55,31 @@ fn fired() {
     FIRED.get().fetch_add(1, Ordering::Relaxed);
 }
 
-/// Take the timer's interrupt `intid` from now on.
+/// The timer's interrupt is edge-triggered (it almost never is).
+static EDGE: AtomicBool = AtomicBool::new(false);
+
+/// Take the timer's interrupt `intid` from now on, starting on this core.
 pub fn init(intid: u32, trigger: gic::Trigger) {
     let mmfr0: u64;
     // SAFETY: reading an ID register has no side effects.
     unsafe { core::arch::asm!("mrs {}, ID_AA64MMFR0_EL1", out(reg) mmfr0) };
     ECV.store(mmfr0 >> 60 != 0, Ordering::Relaxed);
+    EDGE.store(trigger == gic::Trigger::Edge, Ordering::Relaxed);
+    irq::set_handler(intid, fired);
+    INTID.store(intid, Ordering::Release);
+    init_this_core();
+}
+
+/// Switch this core's timer off and its interrupt on (after `init`).
+pub fn init_this_core() {
+    let intid = INTID.load(Ordering::Acquire);
+    if intid == 0 {
+        return;
+    }
     // SAFETY: the timer starts switched off.
     unsafe { core::arch::asm!("msr CNTV_CTL_EL0, xzr", "isb") };
-    irq::set_handler(intid, fired);
-    gic::configure(intid, trigger);
+    gic::configure(intid, if EDGE.load(Ordering::Relaxed) { gic::Trigger::Edge } else { gic::Trigger::Level });
     gic::enable(intid);
-    INTID.store(intid, Ordering::Relaxed);
 }
 
 /// The counter is read through CNTVCTSS_EL0 (FEAT_ECV).

@@ -69,6 +69,10 @@ crate::cpu_local! {
 /// Read-modify-write changes to the configuration go one at a time. Only
 /// set-up code changes it, never an interrupt handler.
 static CONFIG: SpinLock<(), IrqsOn> = SpinLock::new(());
+/// The redistributor ranges, mapped: (virtual, physical, length), and how
+/// many there are.
+type Ranges = ([(u64, u64, u64); 4], usize);
+static RANGES: SpinLock<Ranges, IrqsOn> = SpinLock::new(([(0, 0, 0); 4], 0));
 
 fn read32(addr: u64) -> u32 {
     // SAFETY: only called with addresses inside the mapped GIC blocks.
@@ -157,12 +161,32 @@ pub fn init(gic: &acpi::Gic) -> Result<Found, Error> {
     write32(dist + GICD_CTLR, CTLR_ARE_NS | CTLR_ENABLE_G1A | CTLR_ENABLE_G1);
     wait_clear(dist + GICD_CTLR, CTLR_RWP);
 
-    // This core's redistributor: walk the ranges until one's affinity is
-    // ours. Each takes 128 KiB, or 256 KiB with GICv4's two extra frames.
+    // Map every redistributor range once; each core finds its own in them.
+    {
+        let mut ranges = RANGES.lock();
+        for (n, &(base, len)) in gic.redistributors[..gic.ranges].iter().enumerate() {
+            ranges.0[n] = (map(base, len)?, base, len);
+        }
+        ranges.1 = gic.ranges;
+    }
+    DISTRIBUTOR.store(dist, Ordering::Release);
+    Ok(Found {
+        arch: (read32(dist + GICD_PIDR2) >> 4) & 0xf,
+        iidr: read32(dist + GICD_IIDR),
+        lines,
+        redistributor: init_this_core()?,
+    })
+}
+
+/// Set up this core's redistributor and CPU interface (after `init`, on
+/// every core). Returns the redistributor's physical address.
+pub fn init_this_core() -> Result<u64, Error> {
+    // Walk the ranges until a redistributor's affinity is ours. Each takes
+    // 128 KiB, or 256 KiB with GICv4's two extra frames.
     let me = my_affinity();
+    let (ranges, count) = *RANGES.lock();
     let mut found = None;
-    'ranges: for &(base, len) in &gic.redistributors[..gic.ranges] {
-        let virt = map(base, len)?;
+    'ranges: for &(virt, base, len) in &ranges[..count] {
         let mut offset = 0;
         while offset < len {
             let typer = read64(virt + offset + GICR_TYPER);
@@ -215,15 +239,8 @@ pub fn init(gic: &acpi::Gic) -> Result<Found, Error> {
             t = out(reg) _,
         );
     }
-
-    DISTRIBUTOR.store(dist, Ordering::Relaxed);
     SGI_BASE.get().store(sgi, Ordering::Release);
-    Ok(Found {
-        arch: (read32(dist + GICD_PIDR2) >> 4) & 0xf,
-        iidr: read32(dist + GICD_IIDR),
-        lines,
-        redistributor: rd_phys,
-    })
+    Ok(rd_phys)
 }
 
 /// How an interrupt signals.
@@ -270,12 +287,17 @@ pub fn send_sgi_to_self(intid: u32) {
     let mpidr: u64;
     // SAFETY: reading MPIDR has no side effects.
     unsafe { core::arch::asm!("mrs {}, MPIDR_EL1", out(reg) mpidr) };
+    send_sgi(mpidr, intid);
+}
+
+/// Send SGI `intid` (0-15) to the core with MPIDR affinity `mpidr`.
+pub fn send_sgi(mpidr: u64, intid: u32) {
     let (aff0, aff1, aff2, aff3) = (mpidr & 0xff, (mpidr >> 8) & 0xff, (mpidr >> 16) & 0xff, (mpidr >> 32) & 0xff);
     // ICC_SGI1R: Aff3 [55:48], range selector [47:44] (Aff0 / 16), Aff2
     // [39:32], INTID [27:24], Aff1 [23:16], target list [15:0] (one bit
     // per Aff0 % 16).
     let value = (aff3 << 48) | ((aff0 / 16) << 44) | (aff2 << 32) | ((intid as u64 & 0xf) << 24) | (aff1 << 16) | (1 << (aff0 % 16));
-    // SAFETY: sends one SGI to this core.
+    // SAFETY: sends one SGI.
     unsafe { core::arch::asm!("msr ICC_SGI1R_EL1, {}", "isb", in(reg) value) };
 }
 

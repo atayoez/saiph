@@ -131,7 +131,7 @@ fn qemu(kernel: &Path, mode: &str, words: &[String]) -> Result {
     };
     let error = Command::new("qemu-system-aarch64")
         .args(machine)
-        .args(["-m", "1G"])
+        .args(["-m", "1G", "-smp", "4"])
         .arg("-drive")
         .arg(format!("if=pflash,format=raw,readonly=on,file={AAVMF_CODE}"))
         .arg("-drive")

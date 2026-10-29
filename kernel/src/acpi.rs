@@ -102,6 +102,28 @@ impl Tables {
         (gic.distributor != 0 && gic.ranges > 0).then_some(gic)
     }
 
+    /// The cores the firmware lists in the MADT (its "GIC CPU interface"
+    /// entries) as enabled or able to come online: their MPIDR affinity
+    /// values, written into `out`. Returns how many there are.
+    pub fn cores(&self, out: &mut [u64]) -> usize {
+        let Some(madt) = self.find(b"APIC") else { return 0 };
+        let mut n = 0;
+        let mut at = 44;
+        while at + 2 <= madt.len() && n < out.len() {
+            let (kind, len) = (madt[at], madt[at + 1] as usize);
+            if len < 2 {
+                break;
+            }
+            // Flags at offset 12: bit 0 enabled, bit 3 online capable.
+            if kind == 0x0b && u32_at(madt, at + 12) & 0b1001 != 0 {
+                out[n] = u64_at(madt, at + 68) & 0xff_00ff_ffff;
+                n += 1;
+            }
+            at += len;
+        }
+        n
+    }
+
     /// The virtual timer's interrupt, from the GTDT ("Generic Timer
     /// Description Table"): the EL2 virtual timer's (GTDT revision 3 and
     /// later) when the kernel runs at EL2, the EL1 one's otherwise. Each

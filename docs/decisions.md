@@ -93,6 +93,25 @@ whether the O6 supports them. The whole list was reviewed that way on
   Newer, not adopted yet: pseudo-NMIs through the priority mask (the O6 has
   no FEAT_NMI), `wfet`/`wfit` for bounded waits, a timer wheel for many
   timeouts, and threaded handlers once there is a scheduler.
+- **Cores** (2026-10-29): started through PSCI `CPU_ON`, the standard (PSCI
+  1.1 on the O6) and independent of Limine, rather than Limine's MP
+  feature. ACPI's parking protocol is older and not offered by the O6; the
+  MADT's multiprocessor-wakeup mailbox is x86-only. A starting core gets
+  the boot core's own register values (EL2/VHE, page tables, vectors, PAC
+  key), switches its MMU on from a page mapped 1:1 in the lower half and
+  jumps into the kernel. All cores share one PAC key for now; Linux gives
+  every task its own, which needs tasks first.
+- **Per-core data** (2026-10-29): `cpu_local!` statics, the newest form in
+  Rust kernels (Asterinas; Linux's per-CPU areas in C): a linker section,
+  copied for each core from a snapshot taken at boot, with TPIDR_EL1 holding
+  each core's offset to its copy. Chosen over a per-core struct reached
+  through TPIDR, and over an array indexed by core number.
+- **Kernel stacks** (2026-10-29): each in its own address range above an
+  unmapped guard page (Linux's VMAP_STACK). Kernel code runs on SP_EL0 and
+  exceptions on a separate per-core stack (SP_EL2/SP_EL1), so even a stack
+  overflow is reported.
+- **Console** (2026-10-29): one lock, held for a whole `write!`, masking
+  interrupts; fault reports and panics write without it.
 - **Physical memory**: a bitmap frame allocator. Newer, not adopted yet:
   LLFree (lock-free, per-core reservations), for when the other cores run.
 - **Users** (2026-10-28): single-user. No root, no user accounts, no logins.

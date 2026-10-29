@@ -19,7 +19,7 @@ A learning and research OS for one Armv9 board, built in small steps. UEFI and L
 </div>
 
 > [!NOTE]
-> Saiph is at the very beginning. It boots, sets up its consoles, exception handling, memory protection, page tables, a heap, interrupts and a timer, then powers off or restarts. There is no scheduler, no user space and no driver beyond the console yet. It runs in QEMU and on the real Orion O6.
+> Saiph is at the very beginning. It boots, sets up its consoles, exception handling, memory protection, page tables, a heap, interrupts and a timer, starts all of the board's cores, then powers off or restarts. There is no scheduler yet, so the other cores just wait; no user space and no driver beyond the console either. It runs in QEMU and on the real Orion O6.
 
 ## What works
 
@@ -32,6 +32,7 @@ A learning and research OS for one Armv9 board, built in small steps. UEFI and L
 - **A kernel heap** for `Box`, `Vec` and `String`, run by [talc](https://github.com/SFBdragon/talc). It lives in an address range of its own and grows on demand: when it runs out, the kernel maps more frames at its end, at least 2 MiB at a time.
 - **Interrupts and a tickless timer.** The GIC-700 interrupt controller is found through ACPI and set up for the boot core; a self-test sends the core an interrupt from itself. The timer is set only for the next deadline, and the core sleeps (`wfi`) until then, so the board's 60-second wait before rebooting is a countdown on the screen instead of a busy loop.
 - **Locks of its own**: fair ticket locks whose type says whether they switch interrupts off while held, so a lock that interrupt handlers use can never be taken with interrupts on.
+- **All 12 cores.** The other cores are started through PSCI `CPU_ON` and set up like the boot core; each gets its own stacks (with guard pages, so a stack overflow is reported instead of corrupting memory), its own per-core variables (`cpu_local!`), its part of the GIC and its timer, then answers an interrupt from the boot core. The A720 and A520 cores are told apart by their ID register.
 - **Power off or reboot** through PSCI.
 - **Deliberate faults on request** (`fault-test`, `pac-test`, `bti-test`, `wx-test`) that show each protection is enforced by the hardware, not just configured.
 
@@ -42,7 +43,7 @@ A learning and research OS for one Armv9 board, built in small steps. UEFI and L
 - [x] First boot on the Orion O6
 - [x] Kernel heap
 - [x] Timer and interrupts (GIC-700)
-- [ ] All 12 cores
+- [x] All 12 cores
 - [ ] System calls, IPC and user programs (the kernel's design is decided here)
 - [ ] Storage, USB and networking
 
@@ -104,11 +105,11 @@ This copies Limine and the kernel to `\EFI\saiph` on the EFI system partition an
 
 ## How it works
 
-<p align="center"><img src="docs/boot-flow.svg" width="800" alt="Boot chain: UEFI firmware, systemd-boot, Limine, Saiph. Inside the kernel: consoles, exceptions, PAC and BTI, frame allocator, page tables, heap, interrupts, power off"></p>
+<p align="center"><img src="docs/boot-flow.svg" width="800" alt="Boot chain: UEFI firmware, systemd-boot, Limine, Saiph. Inside the kernel: consoles, exceptions, PAC and BTI, frame allocator, page tables, heap, interrupts, cores, power off"></p>
 
-The firmware starts systemd-boot, which starts Limine for one boot; Limine loads the kernel ELF into the upper half of the address space. The kernel brings up its consoles first, so that even an early failure is visible, then exception handling, pointer authentication and BTI, physical memory, its own page tables, the heap and finally interrupts and the timer:
+The firmware starts systemd-boot, which starts Limine for one boot; Limine loads the kernel ELF into the upper half of the address space. The kernel brings up its consoles first, so that even an early failure is visible, then exception handling, pointer authentication and BTI, physical memory, its own page tables, the heap, interrupts and the timer, and finally starts the other cores:
 
-<p align="center"><img src="docs/address-space.svg" width="800" alt="Virtual address space: kernel image, kernel heap, device window, direct map of RAM, invalid addresses, and the switched-off lower half"></p>
+<p align="center"><img src="docs/address-space.svg" width="800" alt="Virtual address space: kernel image, kernel stacks, kernel heap, device window, direct map of RAM, invalid addresses, and the switched-off lower half"></p>
 
 - **Branch protection everywhere.** Saiph is built for `aarch64-unknown-none-softfloat` with `-Zbuild-std` and `-Zbranch-protection=bti,pac-ret`, so `core` and every other crate it uses are compiled with signed return addresses and landing pads, not just the kernel's own code. Everything is also compiled for the O6's cores (`-Ctarget-cpu=cortex-a520`, which the A720s run too), for Armv9.2 instructions such as single-instruction atomics.
 - **W^X by construction.** The [`paging`](paging) crate has no way to ask for a page that is both writable and executable, and the kernel checks every mapping after building its tables.

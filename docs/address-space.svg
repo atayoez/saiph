@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 402" width="800" height="402" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 452" width="800" height="452" role="img" aria-labelledby="title desc">
   <title id="title">Saiph's virtual address space</title>
-  <desc id="desc">From the top: the kernel image at 0xffff_ffff_8000_0000 (code read and execute, read-only data, data read and write); the kernel heap at 0xffff_d000_0000_0000, read and write, growing on demand; the device window at 0xffff_c000_0000_0000; all RAM in the direct map at 0xffff_0000_0000_0000, never executable; a range of invalid addresses; and the lower half from 0x0000_0000_0000_0000 to 0x0000_ffff_ffff_ffff, switched off and kept for user programs.</desc>
+  <desc id="desc">From the top: the kernel image at 0xffff_ffff_8000_0000 (code read and execute, read-only data, data read and write); the kernel stacks at 0xffff_e000_0000_0000, two per core, each above an unmapped guard page; the kernel heap at 0xffff_d000_0000_0000, read and write, growing on demand; the device window at 0xffff_c000_0000_0000; all RAM in the direct map at 0xffff_0000_0000_0000, never executable; a range of invalid addresses; and the lower half from 0x0000_0000_0000_0000 to 0x0000_ffff_ffff_ffff, switched off and kept for user programs.</desc>
   <defs>
     <pattern id="hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
       <line class="hatch" x1="0" y1="0" x2="0" y2="8"/>
@@ -44,44 +44,52 @@
   <line class="tick" x1="198" y1="100.5" x2="208" y2="100.5"/>
   <text class="addr" x="194" y="104.5">0xffff_ffff_8000_0000</text>
 
-  <!-- Heap region -->
+  <!-- Kernel stacks -->
   <rect class="data" x="208.5" y="110.5" width="183" height="40"/>
-  <text class="name data-t" x="300" y="135">Kernel heap</text>
-  <text class="d1" x="408" y="127">read + write, never execute</text>
-  <text class="d2" x="408" y="143">grows on demand, 2 MiB or more at a time</text>
+  <text class="name data-t" x="300" y="135">Kernel stacks</text>
+  <text class="d1" x="408" y="127">two per core, read + write, never execute</text>
+  <text class="d2" x="408" y="143">each above an unmapped guard page</text>
   <line class="tick" x1="198" y1="150.5" x2="208" y2="150.5"/>
-  <text class="addr" x="194" y="154.5">0xffff_d000_0000_0000</text>
+  <text class="addr" x="194" y="154.5">0xffff_e000_0000_0000</text>
+
+  <!-- Heap region -->
+  <rect class="data" x="208.5" y="160.5" width="183" height="40"/>
+  <text class="name data-t" x="300" y="185">Kernel heap</text>
+  <text class="d1" x="408" y="177">read + write, never execute</text>
+  <text class="d2" x="408" y="193">grows on demand, 2 MiB or more at a time</text>
+  <line class="tick" x1="198" y1="200.5" x2="208" y2="200.5"/>
+  <text class="addr" x="194" y="204.5">0xffff_d000_0000_0000</text>
 
   <!-- Device window -->
-  <rect class="mapped" x="208.5" y="160.5" width="183" height="40"/>
-  <text class="name mapped-t" x="300" y="185">Device registers</text>
-  <text class="d1" x="408" y="177">window base + physical address</text>
-  <text class="d2" x="408" y="193">uncached: the serial port and the GIC</text>
-  <line class="tick" x1="198" y1="200.5" x2="208" y2="200.5"/>
-  <text class="addr" x="194" y="204.5">0xffff_c000_0000_0000</text>
+  <rect class="mapped" x="208.5" y="210.5" width="183" height="40"/>
+  <text class="name mapped-t" x="300" y="235">Device registers</text>
+  <text class="d1" x="408" y="227">window base + physical address</text>
+  <text class="d2" x="408" y="243">uncached: the serial port and the GIC</text>
+  <line class="tick" x1="198" y1="250.5" x2="208" y2="250.5"/>
+  <text class="addr" x="194" y="254.5">0xffff_c000_0000_0000</text>
 
   <!-- Direct map -->
-  <rect class="mapped" x="208.5" y="210.5" width="183" height="66"/>
-  <text class="name mapped-t" x="300" y="248">All RAM (direct map)</text>
-  <text class="d1" x="408" y="236">base + physical address, Limine's offset</text>
-  <text class="d2" x="408" y="253">read + write, never execute;</text>
-  <text class="d2" x="408" y="268">mostly 32 MiB blocks</text>
-  <line class="tick" x1="198" y1="276.5" x2="208" y2="276.5"/>
-  <text class="addr" x="194" y="280.5">0xffff_0000_0000_0000</text>
+  <rect class="mapped" x="208.5" y="260.5" width="183" height="66"/>
+  <text class="name mapped-t" x="300" y="298">All RAM (direct map)</text>
+  <text class="d1" x="408" y="286">base + physical address, Limine's offset</text>
+  <text class="d2" x="408" y="303">read + write, never execute;</text>
+  <text class="d2" x="408" y="318">mostly 32 MiB blocks</text>
+  <line class="tick" x1="198" y1="326.5" x2="208" y2="326.5"/>
+  <text class="addr" x="194" y="330.5">0xffff_0000_0000_0000</text>
 
   <!-- Non-canonical hole -->
-  <rect class="hole" x="208.5" y="276.5" width="183" height="40"/>
-  <text class="d2" x="408" y="300">invalid addresses: the CPU uses 48 bits</text>
+  <rect class="hole" x="208.5" y="326.5" width="183" height="40"/>
+  <text class="d2" x="408" y="350">invalid addresses: the CPU uses 48 bits</text>
 
   <!-- Lower half -->
-  <rect class="off" x="208.5" y="316.5" width="183" height="60"/>
-  <text class="name off-t" x="300" y="351">Lower half: off</text>
-  <text class="d1" x="408" y="341">any access faults</text>
-  <text class="d2" x="408" y="358">kept for user programs</text>
-  <line class="tick" x1="198" y1="316.5" x2="208" y2="316.5"/>
-  <text class="addr" x="194" y="320.5">0x0000_ffff_ffff_ffff</text>
-  <line class="tick" x1="198" y1="376.5" x2="208" y2="376.5"/>
-  <text class="addr" x="194" y="380.5">0x0000_0000_0000_0000</text>
+  <rect class="off" x="208.5" y="366.5" width="183" height="60"/>
+  <text class="name off-t" x="300" y="401">Lower half: off</text>
+  <text class="d1" x="408" y="391">any access faults</text>
+  <text class="d2" x="408" y="408">kept for user programs</text>
+  <line class="tick" x1="198" y1="366.5" x2="208" y2="366.5"/>
+  <text class="addr" x="194" y="370.5">0x0000_ffff_ffff_ffff</text>
+  <line class="tick" x1="198" y1="426.5" x2="208" y2="426.5"/>
+  <text class="addr" x="194" y="430.5">0x0000_0000_0000_0000</text>
 
-  <text class="d2" x="208" y="398">Not to scale. Gaps between blocks are unmapped.</text>
+  <text class="d2" x="208" y="448">Not to scale. Gaps between blocks are unmapped.</text>
 </svg>

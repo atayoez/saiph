@@ -28,8 +28,7 @@ const USAGE: &str = "usage:
   cargo board [remove]                boot Saiph once on this machine, or remove it
   cargo screenshot [file.png]         save what QEMU's screen shows";
 
-/// From the openSUSE packages limine and qemu-uefi-aarch64.
-const LIMINE_EFI: &str = "/usr/share/limine/BOOTAA64.EFI";
+/// QEMU's UEFI firmware, from the openSUSE package qemu-uefi-aarch64.
 const AAVMF_CODE: &str = "/usr/share/qemu/aavmf-aarch64-code.bin";
 const AAVMF_VARS: &str = "/usr/share/qemu/aavmf-aarch64-vars.bin";
 /// The EFI system partition, and Saiph's systemd-boot menu entry on it.
@@ -81,6 +80,11 @@ fn root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap().to_path_buf()
 }
 
+/// Limine, bundled in the repository (see limine/README.md).
+fn limine_efi() -> PathBuf {
+    root().join("limine/BOOTAA64.EFI")
+}
+
 /// Where QEMU's boot image and control socket go.
 fn qemu_dir() -> PathBuf {
     root().join("target/kernel-qemu")
@@ -94,7 +98,7 @@ fn need(path: &str, package: &str) -> Result {
     }
 }
 
-/// kernel/limine.conf, plus a `cmdline:` line when there are words for it.
+/// limine/limine.conf, plus a `cmdline:` line when there are words for it.
 fn limine_conf(base: &str, cmdline: &str) -> String {
     let mut conf = base.to_string();
     if !cmdline.is_empty() {
@@ -104,7 +108,7 @@ fn limine_conf(base: &str, cmdline: &str) -> String {
 }
 
 fn read_limine_conf(cmdline: &str) -> Result<String> {
-    Ok(limine_conf(&fs::read_to_string(root().join("kernel/limine.conf"))?, cmdline))
+    Ok(limine_conf(&fs::read_to_string(root().join("limine/limine.conf"))?, cmdline))
 }
 
 /// Boot the kernel in QEMU. `tcg` emulates a CPU with EL2, so the kernel is
@@ -112,7 +116,6 @@ fn read_limine_conf(cmdline: &str) -> Result<String> {
 /// entered at EL1. The serial console is this terminal (quit with Ctrl+A,
 /// then X). The screen (ramfb) is not shown; `cargo screenshot` saves it.
 fn qemu(kernel: &Path, mode: &str, words: &[String]) -> Result {
-    need(LIMINE_EFI, "limine")?;
     need(AAVMF_CODE, "qemu-uefi-aarch64")?;
     let dir = qemu_dir();
     let _ = fs::remove_dir_all(&dir);
@@ -155,7 +158,7 @@ fn make_image(path: &Path, kernel: &Path, limine_conf: &str) -> Result {
     let root = volume.root_dir();
     let efi = volume.create_dir(&root, "EFI")?;
     let boot = volume.create_dir(&efi, "BOOT")?;
-    add_file(&volume, &boot, "BOOTAA64.EFI", &fs::read(LIMINE_EFI)?)?;
+    add_file(&volume, &boot, "BOOTAA64.EFI", &fs::read(limine_efi())?)?;
     add_file(&volume, &boot, "limine.conf", limine_conf.as_bytes())?;
     let saiph = volume.create_dir(&efi, "saiph")?;
     add_file(&volume, &saiph, "kernel", &fs::read(kernel)?)?;
@@ -232,7 +235,6 @@ fn json_string(s: &str) -> String {
 fn board(kernel: &Path, args: &[String]) -> Result {
     match args.first().map(String::as_str) {
         None => {
-            need(LIMINE_EFI, "limine")?;
             let conf = root().join("target/board-limine.conf");
             fs::write(&conf, read_limine_conf("reboot-after=60")?)?;
             as_root(&["esp-install".as_ref(), ESP.as_ref(), kernel.as_os_str(), conf.as_os_str()])?;
@@ -278,7 +280,7 @@ fn esp_install(args: &[String]) -> Result {
     let esp = Path::new(esp);
     let dir = esp.join("EFI/saiph");
     fs::create_dir_all(&dir)?;
-    fs::copy(LIMINE_EFI, dir.join("limine.efi"))?;
+    fs::copy(limine_efi(), dir.join("limine.efi"))?;
     fs::copy(conf, dir.join("limine.conf"))?;
     fs::copy(kernel, dir.join("kernel"))?;
     fs::write(esp.join("loader/entries").join(ENTRY), "title   Saiph\nefi     /EFI/saiph/limine.efi\n")?;
@@ -360,9 +362,6 @@ mod tests {
         let kernel = dir.join("kernel");
         fs::write(&kernel, vec![0x5a; 300_000]).unwrap();
         let image = dir.join("esp.img");
-        if !Path::new(LIMINE_EFI).exists() {
-            return; // needs the limine package
-        }
         make_image(&image, &kernel, "/Saiph\n").unwrap();
 
         let volume = FatVolume::open(File::open(&image).unwrap()).unwrap();

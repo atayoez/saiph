@@ -10,7 +10,11 @@ board (Radxa Orion O6), never the OS.
   Code offered under MIT, Apache-2.0 or "GPL-2.0 or later" can be used. The
   Fira Code font keeps its own licence (below).
 - **Boot** (2026-10-28): Limine, boot protocol base revision 6. It enters the
-  kernel at EL2 with VHE on the O6, at EL1 under KVM.
+  kernel at EL2 with VHE on the O6, at EL1 under KVM. Since 2026-10-29 Limine
+  is **bundled** (`limine/`: the official, signature-checked 12.9.6 release
+  file plus its licences), so nobody has to install it. Later Saiph gets
+  **its own UEFI loader** and stops depending on Limine; that only changes
+  the boot handover.
 - **Target** (2026-10-28): `aarch64-unknown-none-softfloat` with `-Zbuild-std`
   and `-Zbranch-protection=bti,pac-ret`, on the newest nightly, unpinned.
 - **Build** (2026-10-28): Cargo-native, no scripts. Every command is a Cargo

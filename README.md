@@ -62,10 +62,10 @@ Saiph targets one machine: the [Radxa Orion O6](https://radxa.com/products/orion
 
 ## Try it
 
-Saiph runs in QEMU on any machine, and under KVM on an arm64 Linux host. It needs the newest Rust nightly with `rust-src`, QEMU with the AAVMF firmware, and Limine; the runner uses openSUSE's file locations for the last two. On openSUSE Tumbleweed:
+Saiph runs in QEMU on any machine, and under KVM on an arm64 Linux host. It needs the newest Rust nightly with `rust-src` and QEMU with the AAVMF firmware; the runner uses openSUSE's file location for the firmware. Limine comes bundled in [`limine/`](limine), so there is nothing to install for it. On openSUSE Tumbleweed:
 
 ```sh
-sudo zypper install qemu-arm qemu-uefi-aarch64 limine
+sudo zypper install qemu-arm qemu-uefi-aarch64
 rustup toolchain install nightly --component rust-src
 ```
 
@@ -119,6 +119,7 @@ The firmware starts systemd-boot, which starts Limine for one boot; Limine loads
 | [`frames/`](frames) | The bitmap frame allocator (`no_std`, host-tested) |
 | [`paging/`](paging) | The page-table builder, with W^X built in (`no_std`, host-tested) |
 | [`runner/`](runner) | Boots the kernel Cargo built: in QEMU, or once on the board |
+| [`limine/`](limine) | The bundled Limine bootloader, its licences and Saiph's boot entry |
 | [`docs/`](docs) | Decisions, the roadmap and research notes |
 | [`FINDINGS.md`](FINDINGS.md), [`reports/`](reports) | What the hardware probe and Saiph measured on the board |
 
@@ -132,11 +133,11 @@ Questions and ideas are welcome in [Issues](https://github.com/atayoez/saiph/iss
 
 ## Credits
 
-- [Limine](https://github.com/limine-bootloader/limine) boots Saiph, and the [limine](https://crates.io/crates/limine) crate describes its boot protocol.
+- [Limine](https://github.com/limine-bootloader/limine) boots Saiph; a copy of its official release is bundled in [`limine/`](limine). The [limine](https://crates.io/crates/limine) crate describes its boot protocol.
 - The console font is [Fira Code](https://github.com/tonsky/FiraCode) by The Fira Code Project Authors, rendered at build time with [fontdue](https://github.com/mooman219/fontdue).
 - The hardware probe was built on [uefi-rs](https://github.com/rust-osdev/uefi-rs).
 - The roadmap draws on [seL4](https://sel4.systems), [Redox](https://www.redox-os.org), [Asterinas](https://asterinas.github.io), [Hubris](https://hubris.oxide.computer) and [Managarm](https://managarm.org), and the hardware knowledge on documentation, schematics and ACPI sources published by Radxa and CIX.
 
 ## License
 
-Saiph is free software under the [GNU General Public License v3.0 or later](LICENSE). The Fira Code font in [`kernel/fonts/`](kernel/fonts) keeps its own license, the [SIL Open Font License 1.1](kernel/fonts/FiraCode-LICENSE.txt).
+Saiph is free software under the [GNU General Public License v3.0 or later](LICENSE). The Fira Code font in [`kernel/fonts/`](kernel/fonts) keeps its own license, the [SIL Open Font License 1.1](kernel/fonts/FiraCode-LICENSE.txt), and so does the bundled Limine in [`limine/`](limine) ([BSD-2-Clause](limine/LICENSE), plus [third-party notices](limine/3RDPARTY.md)).

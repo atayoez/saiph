@@ -131,6 +131,12 @@ build fell back to rustup's prebuilt `core`. The hardware was right; the
 kernel now checks its own code for landing pads before switching BTI and PAC
 on, and `cargo kernel` / `cargo board` always build it with the right flags.
 
+Later board runs (2026-10-29), each booting through to the 60 s reset:
+the kernel heap (its own region, grown by mapping pages into the running
+tables with just `dsb ishst; isb`), then 16 KiB pages (TCR.TG1 switched
+inside a break-before-make table switch from an identity-mapped page) and
+code compiled for `cortex-a520` (LSE atomics, `retaa`).
+
 ## What this means for the kernel
 
 1. **It starts at EL2 with VHE available.** It can run as an EL2 kernel without

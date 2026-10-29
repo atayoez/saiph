@@ -6,9 +6,9 @@
 //! interrupts on this core (PSTATE.I), and `eret` restores the mask the
 //! interrupted code had, so handlers are never interrupted themselves.
 //!
-//! Handlers run on the interrupted code's stack, in the middle of whatever
-//! it was doing. So they do little, and they don't print: the console has
-//! no lock yet.
+//! Handlers run on the core's exception stack (see stacks.rs), in the
+//! middle of whatever the core was doing. So they do little, and they don't
+//! print: the console has no lock yet.
 
 use crate::gic;
 use crate::sync::{IrqsOff, SpinLock};

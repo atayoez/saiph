@@ -232,6 +232,10 @@ extern "C" fn saiph_exception(slot: u64, frame: &mut Frame) {
         let write = ec >= 0x24 && frame.esr & (1 << 6) != 0; // WnR bit
         let _ = writeln!(out, "    {}, {} address {:#x}", fault_status(frame.esr & 0x3f),
             if ec <= 0x21 { "fetching" } else if write { "writing" } else { "reading" }, frame.far);
+        if let Some((core, exception_stack)) = crate::stacks::guard_page_of(frame.far) {
+            let _ = writeln!(out, "    a stack overflow: core {core}'s {} stack ran into its guard page",
+                if exception_stack { "exception" } else { "kernel" });
+        }
     }
     let _ = writeln!(out, "    at ELR={:#x}  SPSR={:#x}", frame.elr, frame.spsr);
     for row in 0..8 {

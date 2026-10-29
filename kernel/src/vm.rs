@@ -9,7 +9,9 @@
 //!   in it is read-only;
 //! - a device window: device registers at DEVICE_WINDOW + physical address;
 //! - the heap region (`heap::HEAP_BASE`), mapped page by page as the heap
-//!   grows, through `map`.
+//!   grows, through `map`;
+//! - the kernel stacks (`stacks::STACKS_BASE`), each above an unmapped
+//!   guard page.
 //!
 //! The lower half (TTBR0) is switched off afterwards; it is for user space.
 

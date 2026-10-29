@@ -20,6 +20,7 @@ mod mmu;
 mod protect;
 mod psci;
 mod screen;
+mod stacks;
 mod sync;
 mod timer;
 mod uart;
@@ -215,14 +216,45 @@ extern "C" fn kmain(spsel_at_entry: u64) -> ! {
     // The heap grows in its own region of these tables.
     heap::self_test(&mut out);
 
+    // From here on, kernel code runs on this core's own stack, with a
+    // guard page below it, and exceptions on a separate one (stacks.rs).
+    // Limine's stack stays behind, holding `later`; it is never reused.
+    let later = Later { gic: gic_info, timer_irq, conduit };
+    match stacks::allocate(0) {
+        Ok(stacks) => {
+            let _ = writeln!(out, "  stacks: moving to this core's kernel stack (top {:#x}) and exception stack (top {:#x}), each above a guard page",
+                stacks.kernel_top, stacks.exception_top);
+            stacks::switch(stacks, continue_boot, &later as *const Later as usize)
+        }
+        Err(e) => {
+            let _ = writeln!(out, "Mapping this core's stacks failed: {e}; halting.");
+            halt()
+        }
+    }
+}
+
+/// What the rest of the boot needs from the part on Limine's stack.
+struct Later {
+    gic: Option<acpi::Gic>,
+    timer_irq: Option<(u32, bool)>,
+    conduit: Option<psci::Conduit>,
+}
+
+/// The rest of the boot, on this core's own stacks.
+extern "C" fn continue_boot(later: usize) -> ! {
+    // SAFETY: `later` points to the `Later` in kmain's frame, which stays
+    // put: kmain never returns and Limine's stack is never reused.
+    let later = unsafe { &*(later as *const Later) };
+    let mut out = Console;
+
     // Interrupts: the GIC first, then let them in, then the timer.
-    match gic_info.as_ref().map(gic::init) {
+    match later.gic.as_ref().map(gic::init) {
         Some(Ok(found)) => {
             let _ = writeln!(out, "  interrupts: GICv{} (IIDR {:#x}), {} interrupt IDs, this core's redistributor at {:#x}",
                 found.arch, found.iidr, found.lines, found.redistributor);
             irq::unmask();
             irq::self_test(&mut out);
-            match timer_irq {
+            match later.timer_irq {
                 Some((intid, edge)) => {
                     timer::init(intid, if edge { gic::Trigger::Edge } else { gic::Trigger::Level });
                     let (ok, us) = timer::self_test();
@@ -271,6 +303,10 @@ extern "C" fn kmain(spsel_at_entry: u64) -> ! {
                 // SAFETY: deliberately faults; the handler shows the squares and halts.
                 unsafe { core::ptr::read_volatile(core::ptr::null::<u64>()) };
             }
+            "stack-test" => {
+                let _ = writeln!(out, "  stack-test: recursing until the stack runs out");
+                recurse(0);
+            }
             "wx-test" => {
                 let target = kmain as *const () as *mut u32;
                 let _ = writeln!(out, "  wx-test: writing to kernel code at {target:p}");
@@ -287,7 +323,7 @@ extern "C" fn kmain(spsel_at_entry: u64) -> ! {
         let _ = writeln!(out, "  {unexpected} interrupts arrived that nothing handles (the last was {last}); they are switched off");
     }
 
-    let Some(conduit) = conduit else {
+    let Some(conduit) = later.conduit else {
         let _ = writeln!(out, "No PSCI in the FADT; halting.");
         halt()
     };
@@ -312,6 +348,16 @@ extern "C" fn kmain(spsel_at_entry: u64) -> ! {
         }
     }
     halt()
+}
+
+/// For `stack-test`: calls itself forever, 1 KiB of stack per call, until
+/// the kernel stack runs into its guard page.
+fn recurse(depth: u64) -> u64 {
+    if depth == u64::MAX {
+        return 0; // never reached; keeps the compiler from calling it endless
+    }
+    let frame = core::hint::black_box([depth; 128]);
+    recurse(depth + 1) + frame[0]
 }
 
 #[panic_handler]

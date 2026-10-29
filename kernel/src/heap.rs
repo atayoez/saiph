@@ -11,13 +11,13 @@
 //! It works once the kernel runs on its own page tables (`vm::switch_to`);
 //! before that, every allocation fails.
 
+use crate::sync::{IrqsOff, SpinLock};
 use crate::{memory, vm};
-use core::alloc::Layout;
+use core::alloc::{GlobalAlloc, Layout};
 use core::fmt::Write;
-use core::ptr::NonNull;
+use core::ptr::{NonNull, null_mut};
 use paging::{Kind, PAGE_SIZE};
-use spin::mutex::SpinMutex;
-use talc::TalcLock;
+use talc::DefaultBinning;
 use talc::base::Talc;
 use talc::base::binning::Binning;
 use talc::source::Source;
@@ -31,8 +31,43 @@ const HEAP_MAX: u64 = 1 << 40;
 /// How much the heap grows at least each time talc runs out.
 const GROW: u64 = 2 << 20;
 
+/// talc behind one of Saiph's locks. Interrupt handlers may allocate, so it
+/// is an `IrqsOff` lock.
+struct Heap(SpinLock<Talc<Pages, DefaultBinning>, IrqsOff>);
+
 #[global_allocator]
-static HEAP: TalcLock<SpinMutex<()>, Pages> = TalcLock::new(Pages { mapped: 0, end: 0 });
+static HEAP: Heap = Heap(SpinLock::new(Talc::new(Pages { mapped: 0, end: 0 })));
+
+// SAFETY: talc hands out each byte to one allocation at a time; the lock
+// keeps cores (and interrupt handlers) out of each other's way.
+unsafe impl GlobalAlloc for Heap {
+    unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
+        // SAFETY: `layout` has a nonzero size (GlobalAlloc's contract).
+        unsafe { self.0.lock().allocate(layout) }.map_or(null_mut(), NonNull::as_ptr)
+    }
+
+    unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
+        // SAFETY: `ptr` was allocated here with `layout` (GlobalAlloc's contract).
+        unsafe { self.0.lock().deallocate(ptr, layout) }
+    }
+
+    unsafe fn realloc(&self, ptr: *mut u8, old: Layout, new_size: usize) -> *mut u8 {
+        let mut talc = self.0.lock();
+        // SAFETY: as for `dealloc`; `new_size` is nonzero and, rounded up
+        // to `old.align()`, fits an isize (GlobalAlloc's contract).
+        unsafe {
+            if talc.try_realloc_in_place(ptr, old, new_size) {
+                return ptr;
+            }
+            let Some(moved) = talc.allocate(Layout::from_size_align_unchecked(new_size, old.align())) else {
+                return null_mut();
+            };
+            moved.as_ptr().copy_from_nonoverlapping(ptr, old.size().min(new_size));
+            talc.deallocate(ptr, old);
+            moved.as_ptr()
+        }
+    }
+}
 
 /// talc's source of memory: pages mapped at the end of the heap region.
 #[derive(Debug)]
@@ -81,7 +116,7 @@ unsafe impl Source for Pages {
 
 /// Bytes mapped for the heap so far.
 fn mapped() -> u64 {
-    HEAP.lock().source.mapped
+    HEAP.0.lock().source.mapped
 }
 
 /// Allocate, check and free a few things, among them more than one growth

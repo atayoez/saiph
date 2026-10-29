@@ -135,7 +135,7 @@ Questions and ideas are welcome in [Issues](https://github.com/atayoez/saiph/iss
 ## Credits
 
 - [Limine](https://github.com/limine-bootloader/limine) boots Saiph; a copy of its official release is bundled in [`limine/`](limine). The [limine](https://crates.io/crates/limine) crate describes its boot protocol.
-- The kernel heap is [talc](https://github.com/SFBdragon/talc) by Shaun Beautement, behind a lock from [spin](https://github.com/zesterer/spin-rs).
+- The kernel heap is [talc](https://github.com/SFBdragon/talc) by Shaun Beautement. Saiph's locks plug into [lock_api](https://github.com/Amanieu/parking_lot).
 - The console font is [Fira Code](https://github.com/tonsky/FiraCode) by The Fira Code Project Authors, rendered at build time with [fontdue](https://github.com/mooman219/fontdue).
 - The hardware probe was built on [uefi-rs](https://github.com/rust-osdev/uefi-rs).
 - The roadmap draws on [seL4](https://sel4.systems), [Redox](https://www.redox-os.org), [Asterinas](https://asterinas.github.io), [Hubris](https://hubris.oxide.computer) and [Managarm](https://managarm.org), and the hardware knowledge on documentation, schematics and ACPI sources published by Radxa and CIX.

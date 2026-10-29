@@ -18,6 +18,7 @@ mod mmu;
 mod protect;
 mod psci;
 mod screen;
+mod sync;
 mod timer;
 mod uart;
 mod vm;

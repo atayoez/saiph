@@ -4,11 +4,11 @@ use core::fmt::Write;
 use frames::{FRAME_SIZE, FrameAllocator, words_for};
 use limine::memmap::{self, Entry};
 use limine::request::MemmapRequest;
-use spin::Mutex;
+use crate::sync::{IrqsOff, SpinLock};
 
 /// The frame allocator, once `init` has set it up. The page tables (`vm`)
-/// and the heap take their frames from here.
-pub static FRAMES: Mutex<Option<FrameAllocator<'static>>> = Mutex::new(None);
+/// and the heap take their frames from here, so it is locked like the heap.
+pub static FRAMES: SpinLock<Option<FrameAllocator<'static>>, IrqsOff> = SpinLock::new(None);
 
 /// One free frame, if there is one.
 pub fn alloc_frame() -> Option<u64> {

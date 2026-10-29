@@ -17,8 +17,8 @@ frames = { path = "../frames" }
 paging = { path = "../paging" }
 # The kernel heap's allocator (see src/heap.rs).
 talc = "5.1"
-# Spin locks: around the heap, the frame allocator and the page tables.
-spin = { version = "0.12", default-features = false, features = ["spin_mutex", "lock_api"] }
+# The mutex API Saiph's own locks plug into (see src/sync.rs).
+lock_api = { version = "0.5", default-features = false }
 
 [build-dependencies]
 # Renders the console font (fonts/) into letter images at build time.

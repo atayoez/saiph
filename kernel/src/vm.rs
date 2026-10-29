@@ -16,7 +16,7 @@
 use crate::{memory, mmu, screen};
 use limine::memmap;
 use paging::{ENTRIES, Kind, MapError, Mapper, PAGE_SIZE, TableMemory};
-use spin::Mutex;
+use crate::sync::{IrqsOff, SpinLock};
 
 /// Where device registers appear: this offset plus their physical address.
 /// Above the direct map (which ends below 0xffff_0100_0000_0000 for the O6's
@@ -24,7 +24,8 @@ use spin::Mutex;
 pub const DEVICE_WINDOW: u64 = 0xffff_c000_0000_0000;
 
 /// The tables the kernel runs on, once `switch_to` has switched to them.
-static RUNNING: Mutex<Option<Mapper<KernelTables>>> = Mutex::new(None);
+/// The heap grows through them, so they are locked like the heap.
+static RUNNING: SpinLock<Option<Mapper<KernelTables>>, IrqsOff> = SpinLock::new(None);
 
 /// Page-table memory for the kernel: frames from the frame allocator,
 /// reached through the direct map.

@@ -112,6 +112,17 @@ whether the O6 supports them. The whole list was reviewed that way on
   overflow is reported.
 - **Console** (2026-10-29): one lock, held for a whole `write!`, masking
   interrupts; fault reports and panics write without it.
+- **Boot log** (2026-10-30): saved in UEFI variables (SaiphLog00, 01, ...,
+  4000 bytes each, Saiph's GUID 85a3298b-98bf-462c-8985-29bb1d4e9363) by
+  calling the firmware's SetVariable after boot, at the end of the boot and
+  after a crash; `cargo board log` reads them back in Linux. The same
+  mechanism as Linux's efi-pstore. The firmware runs at its physical
+  addresses in lower-half tables of its own (4 KiB pages), built from the
+  EFI memory map, only during a call; its code regions are mapped writable
+  and executable there, as Linux does without the firmware's memory
+  attributes table. Not chosen: a file on disk (needs a storage driver),
+  RAM kept across the reboot (Linux's ramoops; fragile), the ACPI ERST
+  (the O6 has none).
 - **Physical memory**: a bitmap frame allocator. Newer, not adopted yet:
   LLFree (lock-free, per-core reservations), for when the other cores run.
 - **Users** (2026-10-28): single-user. No root, no user accounts, no logins.

@@ -7,6 +7,7 @@
 //!                                           the kernel's command line
 //!   runner <kernel> board [remove]          boot it once on this machine (the
 //!                                           Orion O6), or remove it again
+//!   runner <kernel> board log               print the log Saiph saved there
 //!   runner <kernel> screenshot [file.png]   save what QEMU's screen shows
 
 use hadris_fat::format::{FatFormatOptions, FatTypeSelection, FatVolumeFormatter};
@@ -26,6 +27,7 @@ type Result<T = ()> = std::result::Result<T, Box<dyn Error>>;
 const USAGE: &str = "usage:
   cargo kernel [tcg|kvm] [words...]   build Saiph and boot it in QEMU
   cargo board [remove]                boot Saiph once on this machine, or remove it
+  cargo board log                     print what Saiph printed on its last boot here
   cargo screenshot [file.png]         save what QEMU's screen shows";
 
 /// QEMU's UEFI firmware, from the openSUSE package qemu-uefi-aarch64.
@@ -37,6 +39,11 @@ const ENTRY: &str = "saiph.conf";
 /// Where the hardware probe installed itself (removed from the repository;
 /// see the git tag probe-final). `cargo board remove` cleans it up too.
 const OLD_PROBE_ENTRY: &str = "orion-probe.conf";
+/// Saiph's boot log: EFI variables SaiphLog00, SaiphLog01, ... with Saiph's
+/// GUID (see kernel/src/efi.rs). efivarfs puts 4 bytes of attributes first.
+const LOG_VAR_DIR: &str = "/sys/firmware/efi/efivars";
+const LOG_VAR_GUID: &str = "85a3298b-98bf-462c-8985-29bb1d4e9363";
+const LOG_VARS: usize = 16;
 /// systemd-boot's one-time boot entry, an EFI variable.
 const ONESHOT_VAR: &str = "/sys/firmware/efi/efivars/LoaderEntryOneShot-4a67b082-0a4c-41cf-b6c7-440b29bb8c4f";
 
@@ -259,8 +266,31 @@ fn board(kernel: &Path, args: &[String]) -> Result {
             println!("Removed Saiph (and the old hardware probe, if it was there) from the ESP.");
             Ok(())
         }
+        Some("log") => {
+            let log = read_log(Path::new(LOG_VAR_DIR))?;
+            if log.is_empty() {
+                println!("No boot log from Saiph on this machine yet.");
+            } else {
+                io::stdout().write_all(&log)?;
+            }
+            Ok(())
+        }
         Some(other) => Err(format!("unknown board command `{other}`\n{USAGE}").into()),
     }
+}
+
+/// Saiph's boot log from the EFI variables in `dir`: SaiphLog00, 01, ...
+/// until one is missing, each without its 4 bytes of attributes.
+fn read_log(dir: &Path) -> Result<Vec<u8>> {
+    let mut log = Vec::new();
+    for n in 0..LOG_VARS {
+        match fs::read(dir.join(format!("SaiphLog{n:02}-{LOG_VAR_GUID}"))) {
+            Ok(data) => log.extend_from_slice(data.get(4..).unwrap_or_default()),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => break,
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Ok(log)
 }
 
 /// Run this program again as root through pkexec (one password dialog) for
@@ -332,6 +362,18 @@ fn decode_efi_string(raw: &[u8]) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn boot_log_joins_the_variables_in_order() {
+        let dir = std::env::temp_dir().join(format!("saiph-log-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let var = |n: usize| dir.join(format!("SaiphLog{n:02}-{}", super::LOG_VAR_GUID));
+        std::fs::write(var(0), b"\x07\0\0\0first ").unwrap();
+        std::fs::write(var(1), b"\x07\0\0\0second").unwrap();
+        std::fs::write(var(3), b"\x07\0\0\0stale").unwrap(); // after a gap: ignored
+        assert_eq!(super::read_log(&dir).unwrap(), b"first second");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     use super::*;
 
     #[test]

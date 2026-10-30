@@ -248,6 +248,7 @@ extern "C" fn saiph_exception(slot: u64, frame: &mut Frame) {
         }
         let _ = writeln!(out);
     }
+    crate::efi::save_log_after_crash(&mut out);
     let _ = writeln!(out, "    halting.");
     crate::halt()
 }

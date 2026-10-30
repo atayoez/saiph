@@ -33,6 +33,7 @@ A learning and research OS for one Armv9 board, built in small steps. UEFI and L
 - **Interrupts and a tickless timer.** The GIC-700 interrupt controller is found through ACPI and set up for the boot core; a self-test sends the core an interrupt from itself. The timer is set only for the next deadline, and the core sleeps (`wfi`) until then, so the board's 60-second wait before rebooting is a countdown on the screen instead of a busy loop.
 - **Locks of its own**: fair ticket locks whose type says whether they switch interrupts off while held, so a lock that interrupt handlers use can never be taken with interrupts on.
 - **All 12 cores.** The other cores are started through PSCI `CPU_ON` and set up like the boot core; each gets its own stacks (with guard pages, so a stack overflow is reported instead of corrupting memory), its own per-core variables (`cpu_local!`), its part of the GIC and its timer, then answers an interrupt from the boot core. The A720 and A520 cores are told apart by their ID register.
+- **A boot log that survives the reboot.** Saiph calls the UEFI firmware's runtime services, which stay in memory after boot, and saves everything it printed in UEFI variables, at the end of the boot and after a crash. Linux shows them as files, and `cargo board log` prints them.
 - **Power off or reboot** through PSCI.
 - **Deliberate faults on request** (`fault-test`, `pac-test`, `bti-test`, `wx-test`) that show each protection is enforced by the hardware, not just configured.
 
@@ -101,7 +102,7 @@ If the board runs Linux with systemd-boot, Saiph can boot once without changing 
 cargo board
 ```
 
-This copies Limine and the kernel to `\EFI\saiph` on the EFI system partition and arms a one-time boot entry, asking for your password once. Saiph shows its output on the screen, then reboots into Linux after 60 seconds. `cargo board remove` cleans up.
+This copies Limine and the kernel to `\EFI\saiph` on the EFI system partition and arms a one-time boot entry, asking for your password once. Saiph shows its output on the screen, saves it in UEFI variables, then reboots into Linux after a 60-second countdown. Back in Linux, `cargo board log` prints what it showed. `cargo board remove` cleans up.
 
 ## How it works
 

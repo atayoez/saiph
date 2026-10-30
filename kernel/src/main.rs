@@ -11,6 +11,7 @@ extern crate alloc;
 
 mod acpi;
 mod console;
+mod efi;
 mod exceptions;
 mod gic;
 mod heap;
@@ -221,6 +222,10 @@ extern "C" fn kmain(spsel_at_entry: u64) -> ! {
 
     // The heap grows in its own region of these tables.
     heap::self_test(&mut out);
+    // Ready to save the log in UEFI variables, from now on even on a crash.
+    if !efi::init(hhdm.offset) {
+        let _ = writeln!(out, "  boot log: no EFI system table or memory map from Limine; it will not be saved");
+    }
 
     // From here on, kernel code runs on this core's own stack, with a
     // guard page below it, and exceptions on a separate one (stacks.rs).
@@ -348,6 +353,17 @@ extern "C" fn continue_boot(later: usize) -> ! {
         let _ = writeln!(out, "  {unexpected} interrupts arrived that nothing handles (the last was {last}); they are switched off");
     }
 
+    // Save everything printed so far, to read after the reboot.
+    match efi::save_log() {
+        Ok(saved) => {
+            let _ = writeln!(out, "  boot log: {} bytes saved in {} UEFI variables{} (`cargo board log` prints them)",
+                saved.bytes, saved.chunks, if saved.read_back { ", read back ok" } else { ", but reading it back FAILED" });
+        }
+        Err(e) => {
+            let _ = writeln!(out, "  boot log: not saved, UEFI said {e}");
+        }
+    }
+
     let Some(conduit) = later.conduit else {
         let _ = writeln!(out, "No PSCI in the FADT; halting.");
         halt()
@@ -388,5 +404,6 @@ fn recurse(depth: u64) -> u64 {
 #[panic_handler]
 fn panic(info: &core::panic::PanicInfo) -> ! {
     let _ = writeln!(console::Raw, "\nkernel panic: {info}");
+    efi::save_log_after_crash(&mut console::Raw);
     halt()
 }

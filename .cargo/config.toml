@@ -4,6 +4,7 @@
 #                                       the words become its command line
 #   cargo board [remove]                boot it once on this machine (the O6),
 #                                       or remove it from the ESP again
+#   cargo board log                     print the log it saved on that boot
 #   cargo screenshot [file.png]         save what QEMU's screen shows
 #   cargo test                          the host-side unit tests
 #

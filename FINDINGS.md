@@ -138,7 +138,12 @@ inside a break-before-make table switch from an identity-mapped page) and
 code compiled for `cortex-a520` (LSE atomics, `retaa`), then interrupts:
 the GIC-700 set up through its system-register interface, an SGI from the
 boot core to itself, and the EL2 virtual timer on interrupt 28 (as the GTDT
-says) waking the core from `wfi` for the reboot countdown.
+says) waking the core from `wfi` for the reboot countdown. On 2026-10-30
+all 12 cores started through PSCI `CPU_ON` from EL2 (8 Cortex-A720, 4
+Cortex-A520, told apart by MIDR), each answered an SGI from the boot core
+and was woken by its own timer. That run's log came back through a UEFI
+variable (`SetVariable` from EL2 works on this firmware): the boot core's
+redistributor is the 11th in the GICR range (`0xe310000`, 256 KiB apart).
 
 ## What this means for the kernel
 

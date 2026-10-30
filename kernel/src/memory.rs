@@ -4,20 +4,22 @@ use core::fmt::Write;
 use frames::{FRAME_SIZE, FrameAllocator, words_for};
 use limine::memmap::{self, Entry};
 use limine::request::MemmapRequest;
-use crate::sync::{IrqsOff, SpinLock};
+use crate::sync::Once;
+use core::sync::atomic::AtomicU64;
 
-/// The frame allocator, once `init` has set it up. The page tables (`vm`)
-/// and the heap take their frames from here, so it is locked like the heap.
-pub static FRAMES: SpinLock<Option<FrameAllocator<'static>>, IrqsOff> = SpinLock::new(None);
+/// The frame allocator, once `init` has set it up. The page tables (`vm`),
+/// the heap and the stacks take their frames from here. It needs no lock:
+/// every core can allocate and free at once (see the `frames` crate).
+pub static FRAMES: Once<FrameAllocator<'static>> = Once::new();
 
 /// One free frame, if there is one.
 pub fn alloc_frame() -> Option<u64> {
-    FRAMES.lock().as_mut()?.alloc()
+    FRAMES.get()?.alloc()
 }
 
 /// Give back a frame from `alloc_frame`.
 pub fn free_frame(frame: u64) {
-    if let Some(fa) = FRAMES.lock().as_mut() {
+    if let Some(fa) = FRAMES.get() {
         let _ = fa.free(frame);
     }
 }
@@ -77,24 +79,23 @@ fn set_up(out: &mut impl Write, hhdm: u64) -> Option<()> {
     let home = entries.iter().find(|e| e.type_ == memmap::MEMMAP_USABLE && e.base % 8 == 0 && e.length >= bytes)?;
     // SAFETY: usable RAM, mapped by the HHDM, not used by anything else yet;
     // the allocator marks these frames in use below before handing any out.
-    let bits = unsafe { core::slice::from_raw_parts_mut((home.base + hhdm) as *mut u64, words_for(frames)) };
+    // (AtomicU64 has the same size and layout as u64.)
+    let bits = unsafe { core::slice::from_raw_parts((home.base + hhdm) as *const AtomicU64, words_for(frames)) };
 
-    let mut fa = FrameAllocator::new(bits, low, frames);
+    let fa = FrameAllocator::new(bits, low, frames);
     for e in entries.iter().filter(|e| e.type_ == memmap::MEMMAP_USABLE) {
         fa.mark_free(e.base, e.length);
     }
     fa.mark_used(home.base, bytes);
     let _ = writeln!(out, "  frame allocator: {low:#x}..{high:#x} ({frames} frames), bitmap {} KiB at {:#x}, {} frames ({} MiB) free",
         bytes.div_ceil(1024), home.base, fa.free_frames(), fa.free_frames() as u64 * FRAME_SIZE >> 20);
-    *FRAMES.lock() = Some(fa);
-    Some(())
+    FRAMES.set(fa).ok()
 }
 
 /// Allocate a few frames, write and read them through the direct map, give
 /// them back, and check that nothing went missing.
 pub fn self_test(out: &mut impl Write, hhdm: u64) -> bool {
-    let mut frames = FRAMES.lock();
-    let Some(fa) = frames.as_mut() else { return false };
+    let Some(fa) = FRAMES.get() else { return false };
     let before = fa.free_frames();
     let mut ok = true;
     let mut singles = [0u64; 3];

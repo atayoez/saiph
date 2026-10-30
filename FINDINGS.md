@@ -144,6 +144,12 @@ Cortex-A520, told apart by MIDR), each answered an SGI from the boot core
 and was woken by its own timer. That run's log came back through a UEFI
 variable (`SetVariable` from EL2 works on this firmware): the boot core's
 redistributor is the 11th in the GICR range (`0xe310000`, 256 KiB apart).
+The next run (2026-10-30), with the lock-free frame allocator, the lock
+order checks and the scheduler, scheduled threads on all 12 cores: weight
+2048 against 1024 got 1.99x to 2.02x the CPU time on every core, a 2 ms per
+10 ms budget at high priority got 20.2% of its core (as under KVM; QEMU's
+emulated timer lets it overrun to about 25%), and 36 threads queued on the
+boot core were stolen by, and ran on, all 12 cores.
 
 ## What this means for the kernel
 

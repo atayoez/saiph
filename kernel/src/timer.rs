@@ -47,12 +47,25 @@ pub fn now() -> u64 {
     c
 }
 
-/// The interrupt handler: the deadline has passed. Switch the timer off;
-/// its interrupt is level-triggered and would otherwise keep coming.
+/// The interrupt handler: the deadline has passed. Switch the timer off
+/// (its interrupt is level-triggered and would otherwise keep coming), and
+/// let the scheduler set the next deadline, if it runs on this core.
 fn fired() {
+    disarm();
+    FIRED.get().fetch_add(1, Ordering::Relaxed);
+    crate::sched::timer_fired();
+}
+
+/// Set this core's timer to fire at `deadline`.
+pub fn arm(deadline: u64) {
+    // SAFETY: sets this core's virtual timer.
+    unsafe { core::arch::asm!("msr CNTV_CVAL_EL0, {}", "msr CNTV_CTL_EL0, {}", "isb", in(reg) deadline, in(reg) ENABLE) };
+}
+
+/// Switch this core's timer off.
+pub fn disarm() {
     // SAFETY: turns this core's virtual timer off.
     unsafe { core::arch::asm!("msr CNTV_CTL_EL0, xzr", "isb") };
-    FIRED.get().fetch_add(1, Ordering::Relaxed);
 }
 
 /// The timer's interrupt is edge-triggered (it almost never is).
@@ -100,8 +113,7 @@ pub fn sleep_until(deadline: u64) {
         }
         return;
     }
-    // SAFETY: sets this core's virtual timer to fire at `deadline`.
-    unsafe { core::arch::asm!("msr CNTV_CVAL_EL0, {}", "msr CNTV_CTL_EL0, {}", "isb", in(reg) deadline, in(reg) ENABLE) };
+    arm(deadline);
     loop {
         // Interrupts are masked around the check, so the timer's interrupt
         // cannot slip in between "not yet" and `wfi` and leave the core

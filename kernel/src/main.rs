@@ -21,6 +21,7 @@ mod mmu;
 mod percpu;
 mod protect;
 mod psci;
+mod sched;
 mod screen;
 mod smp;
 mod stacks;
@@ -291,10 +292,19 @@ extern "C" fn continue_boot(later: usize) -> ! {
                     let _ = writeln!(out, "  timer: the GTDT names no interrupt for the virtual timer; waiting by reading the counter");
                 }
             }
-            // The other cores.
-            if let Some(conduit) = later.conduit {
+            // The other cores, then threads on all of them.
+            if let (Some(conduit), Some(_)) = (later.conduit, later.timer_irq) {
+                sched::init();
                 let (virt, phys) = later.kernel;
                 smp::start_all(&mut out, &later.mpidrs[..later.cores], conduit, later.hhdm, |va| va - virt + phys);
+                match sched::start_boot_core() {
+                    Ok(()) => {
+                        sched::self_test(&mut out);
+                    }
+                    Err(e) => {
+                        let _ = writeln!(out, "  scheduler: could not start on the boot core: {e}");
+                    }
+                }
             }
         }
         Some(Err(e)) => {
@@ -380,7 +390,7 @@ extern "C" fn continue_boot(later: usize) -> ! {
             let (start, freq) = (timer::now(), timer::frequency());
             for left in (1..=secs).rev() {
                 let _ = write!(out, "\rRebooting in {left} s ");
-                timer::sleep_until(start + (secs + 1 - left) * freq);
+                sched::sleep_until(start + (secs + 1 - left) * freq);
             }
             let _ = writeln!(out, "\rRebooting now.      ");
             let error = psci::system_reset(conduit);

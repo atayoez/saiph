@@ -19,7 +19,7 @@ A learning and research OS for one Armv9 board, built in small steps. UEFI and L
 </div>
 
 > [!NOTE]
-> Saiph is at the very beginning. It boots, sets up its consoles, exception handling, memory protection, page tables, a heap, interrupts and a timer, starts all of the board's cores, then powers off or restarts. There is no scheduler yet, so the other cores just wait; no user space and no driver beyond the console either. It runs in QEMU and on the real Orion O6.
+> Saiph is at the very beginning. It boots, sets up its consoles, exception handling, memory protection, page tables, a heap, interrupts and a timer, starts all of the board's cores and schedules kernel threads on them, then powers off or restarts. There is no user space and no driver beyond the console yet. It runs in QEMU and on the real Orion O6.
 
 ## What works
 
@@ -33,6 +33,7 @@ A learning and research OS for one Armv9 board, built in small steps. UEFI and L
 - **Interrupts and a tickless timer.** The GIC-700 interrupt controller is found through ACPI and set up for the boot core; a self-test sends the core an interrupt from itself. The timer is set only for the next deadline, and the core sleeps (`wfi`) until then, so the board's 60-second wait before rebooting is a countdown on the screen instead of a busy loop.
 - **Few locks, in a checked order.** Atomics wherever one value is enough. The remaining locks are fair ticket locks whose type says whether they switch interrupts off while held, and where they stand in the lock order: taking locks in the wrong order panics with both names the first time the code runs, before it can ever deadlock, and the nesting the code relies on is checked at compile time.
 - **All 12 cores.** The other cores are started through PSCI `CPU_ON` and set up like the boot core; each gets its own stacks (with guard pages, so a stack overflow is reported instead of corrupting memory), its own per-core variables (`cpu_local!`), its part of the GIC and its timer, then answers an interrupt from the boot core. The A720 and A520 cores are told apart by their ID register.
+- **Threads and a scheduler.** One run queue per core, and idle cores steal work from busy ones. Scheduling contexts (a priority and a CPU budget per period, as in seL4) decide how much time a thread may use; EEVDF, Linux's fair scheduler, orders threads of the same priority. Preemption is lazy, like Linux's on arm64, and tickless: the timer is set only for the next slice end, budget refill or wake-up. A self-test checks the result on every boot (under KVM: weights 2:1 give 1.99–2.02x the CPU time, a 2 ms per 10 ms budget gives 20.2%).
 - **A boot log that survives the reboot.** Saiph calls the UEFI firmware's runtime services, which stay in memory after boot, and saves everything it printed in UEFI variables, at the end of the boot and after a crash. Linux shows them as files, and `cargo board log` prints them.
 - **Power off or reboot** through PSCI.
 - **Deliberate faults on request** (`fault-test`, `pac-test`, `bti-test`, `wx-test`) that show each protection is enforced by the hardware, not just configured.

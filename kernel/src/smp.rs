@@ -124,6 +124,18 @@ static MIDR: [AtomicU64; stacks::MAX_CORES] = [const { AtomicU64::new(0) }; stac
 static PINGED: [AtomicBool; stacks::MAX_CORES] = [const { AtomicBool::new(false) }; stacks::MAX_CORES];
 /// Per core: its own timer woke it from a 10 ms sleep.
 static TIMER_OK: [AtomicBool; stacks::MAX_CORES] = [const { AtomicBool::new(false) }; stacks::MAX_CORES];
+/// Per core: its MPIDR affinity, to send it interrupts.
+static MPIDR_OF: [AtomicU64; stacks::MAX_CORES] = [const { AtomicU64::new(0) }; stacks::MAX_CORES];
+
+/// This core's number: 0 for the boot core, 1.. for the others.
+pub fn this_core() -> usize {
+    CORE.get().load(Ordering::Relaxed)
+}
+
+/// The MPIDR affinity of core `core`.
+pub fn mpidr(core: usize) -> u64 {
+    MPIDR_OF[core].load(Ordering::Relaxed)
+}
 
 fn read_midr() -> u64 {
     let midr: u64;
@@ -165,6 +177,9 @@ extern "C" fn secondary_main(core: usize) -> ! {
         }
     }
     RUNNING[core].store(true, Ordering::Release);
+    if TIMER_OK[core].load(Ordering::Relaxed) {
+        crate::sched::start_other_core();
+    }
     loop {
         // SAFETY: waits for an interrupt; changes nothing.
         unsafe { core::arch::asm!("wfi", options(nostack)) };
@@ -223,6 +238,7 @@ pub fn start_all(out: &mut impl Write, mpidrs: &[u64], conduit: psci::Conduit, h
     // for a core that did not start.
     let mut running = [(0usize, 0u64); stacks::MAX_CORES];
     running[0] = (0, me);
+    MPIDR_OF[0].store(me, Ordering::Relaxed);
     let mut cores = 1;
     for (core, &mpidr) in (1..stacks::MAX_CORES).zip(mpidrs.iter().filter(|&&m| m != me)) {
         let stacks = match stacks::allocate(core) {
@@ -257,6 +273,7 @@ pub fn start_all(out: &mut impl Write, mpidrs: &[u64], conduit: psci::Conduit, h
         unsafe { block.write(boot) };
         clean_to_ram(block as u64, size_of::<Boot>() as u64);
 
+        MPIDR_OF[core].store(mpidr, Ordering::Relaxed);
         let result = psci::cpu_on(conduit, mpidr, entry, frame);
         let started = result == 0 && {
             // Give it up to a second to report in.

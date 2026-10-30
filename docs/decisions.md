@@ -128,6 +128,24 @@ whether the O6 supports them. The whole list was reviewed that way on
   overflow is reported.
 - **Console** (2026-10-29): one lock, held for a whole `write!`, masking
   interrupts; fault reports and panics write without it.
+- **Threads and scheduling** (2026-10-30): kernel threads with guard-paged
+  stacks; one run queue per core, idle cores steal waiting threads (and
+  are woken to do so when a core gets busy); the policy sits behind a
+  `Policy` trait, so it can be swapped (Linux's sched_ext, complete with
+  sub-schedulers in 7.3, is the model). The first policy: seL4-style
+  scheduling contexts (a priority and a CPU budget per period, refilled
+  periodically for now; seL4 uses sporadic servers) decide how much time a
+  thread may use, and EEVDF (Linux's fair scheduler since 6.6, still the
+  policy in 7.3 after 7.0's lazy preemption, 7.2's cache-aware scheduling
+  and proxy execution, and 7.3's "flatten the pick") orders threads of the
+  same priority. Preemption is lazy (Linux's preferred arm64 mode since
+  7.0): a thread is switched at the end of its slice or budget, at once
+  only for a more urgent one. The timer is set only for the next such
+  event. IRQ frames are saved on the interrupted thread's stack, so a
+  switch can happen inside an interrupt handler; faults stay on the
+  per-core exception stack. Later: lending scheduling contexts along with
+  messages (the microkernel form of proxy execution), energy-aware
+  placement on the A720s and A520s, freeing finished threads' stacks.
 - **Boot log** (2026-10-30): saved in UEFI variables (SaiphLog00, 01, ...,
   4000 bytes each, Saiph's GUID 85a3298b-98bf-462c-8985-29bb1d4e9363) by
   calling the firmware's SetVariable after boot, at the end of the boot and

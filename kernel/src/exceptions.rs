@@ -8,7 +8,8 @@
 //! puts its slot number in x0 and jumps to common code, which saves the
 //! remaining registers plus ELR/SPSR/ESR/FAR as a `Frame` on the stack,
 //! calls `saiph_exception`, restores everything and returns with `eret`.
-//! IRQs go on to `irq::handle`; everything else unexpected is reported.
+//! IRQs go on to `irq::handle` (with their frame on the interrupted
+//! thread's stack, see below); everything else unexpected is reported.
 //! The `_EL1` register names reach the EL2 registers under VHE.
 
 use crate::console::Raw;
@@ -49,6 +50,13 @@ core::arch::global_asm!(
     "saiph_vectors:",
     ".irp slot, 0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15",
     ".balign 128",
+    // An IRQ that interrupted code on SP_EL0 (a thread's stack) keeps its
+    // frame on that stack, so the scheduler may switch threads inside the
+    // handler; eret then returns on SP_EL0 again (SPSR says so). Faults
+    // stay on the exception stack, to be reported even if SP_EL0 is bad.
+    ".if \\slot == 1",
+    "msr SPSel, #0",
+    ".endif",
     "sub sp, sp, #{size}",
     "stp x0, x1, [sp, #0]",
     "mov x0, #\\slot",
@@ -199,9 +207,11 @@ mod alloc_free {
 /// Called by the vector code for every exception.
 #[unsafe(no_mangle)]
 extern "C" fn saiph_exception(slot: u64, frame: &mut Frame) {
-    // Interrupts are routine, not errors: they go to the interrupt code.
+    // Interrupts are routine, not errors: they go to the interrupt code,
+    // and afterwards the scheduler may switch to another thread.
     if slot & 3 == 1 {
         crate::irq::handle();
+        crate::sched::preempt_if_needed();
         return;
     }
     // Set the flag, noting whether it was already set. In assembly, as even
@@ -232,9 +242,15 @@ extern "C" fn saiph_exception(slot: u64, frame: &mut Frame) {
         let write = ec >= 0x24 && frame.esr & (1 << 6) != 0; // WnR bit
         let _ = writeln!(out, "    {}, {} address {:#x}", fault_status(frame.esr & 0x3f),
             if ec <= 0x21 { "fetching" } else if write { "writing" } else { "reading" }, frame.far);
-        if let Some((core, exception_stack)) = crate::stacks::guard_page_of(frame.far) {
-            let _ = writeln!(out, "    a stack overflow: core {core}'s {} stack ran into its guard page",
-                if exception_stack { "exception" } else { "kernel" });
+        match crate::stacks::guard_page_of(frame.far) {
+            Some(crate::stacks::Guard::Core(core, exception_stack)) => {
+                let _ = writeln!(out, "    a stack overflow: core {core}'s {} stack ran into its guard page",
+                    if exception_stack { "exception" } else { "kernel" });
+            }
+            Some(crate::stacks::Guard::Thread(n)) => {
+                let _ = writeln!(out, "    a stack overflow: thread {n}'s stack ran into its guard page");
+            }
+            None => {}
         }
     }
     let _ = writeln!(out, "    at ELR={:#x}  SPSR={:#x}", frame.elr, frame.spsr);

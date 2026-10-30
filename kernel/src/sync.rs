@@ -67,18 +67,21 @@ macro_rules! levels {
 /// lock may only take locks further down this list.
 pub mod order {
     levels! {
-        /// The kernel heap. Growing it maps pages, so it comes first.
-        Heap = 1;
+        /// A core's run queue. It may grow (allocate) while locked, so it
+        /// comes before the heap.
+        RunQueue = 1;
+        /// The kernel heap. Growing it maps pages.
+        Heap = 2;
         /// The page tables the kernel runs on.
-        PageTables = 2;
+        PageTables = 3;
         /// Calls into the UEFI firmware.
-        Firmware = 3;
+        Firmware = 4;
         /// The GIC's configuration registers.
-        GicConfig = 4;
+        GicConfig = 5;
         /// Locks that only self-tests use.
-        Test = 5;
+        Test = 6;
         /// The console comes last, so anything may print while holding a lock.
-        Console = 6;
+        Console = 7;
     }
 }
 
@@ -113,6 +116,11 @@ pub fn enter_handler() -> u64 {
 /// Leaving an interrupt handler: back to the interrupted code's locks.
 pub fn leave_handler(held: u64) {
     HELD.get().store(held, Ordering::Relaxed);
+}
+
+/// This core holds a lock (of any kind).
+pub fn holding_locks() -> bool {
+    HELD.get().load(Ordering::Relaxed) != 0
 }
 
 /// What a lock does to interrupts while it is held.
@@ -208,6 +216,28 @@ unsafe impl<G: Guardian, L: Level> lock_api::RawMutex for TicketLock<G, L> {
     }
 }
 
+impl<G: Guardian, L: Level> TicketLock<G, L> {
+    pub const fn new() -> Self {
+        <Self as lock_api::RawMutex>::INIT
+    }
+
+    /// Take the lock without a guard, for a lock that one thread takes
+    /// and another releases (the scheduler's, across a thread switch).
+    pub fn raw_lock(&self) {
+        // The guard state carries nothing; `raw_unlock` makes a new one.
+        let _held = <Self as lock_api::RawMutex>::lock(self);
+    }
+
+    /// Release a lock taken with `raw_lock`, on the same core.
+    ///
+    /// # Safety
+    /// This core must hold the lock.
+    pub unsafe fn raw_unlock(&self) {
+        // SAFETY: the caller holds the lock.
+        unsafe { <Self as lock_api::RawMutex>::unlock(self, Held(PhantomData)) }
+    }
+}
+
 /// Sleep until `word` may have changed from `old`, the way Linux waits on
 /// arm64: `ldxr` puts the word in this core's exclusive monitor, and when
 /// another core writes it, the monitor clears and wakes `wfe`. Other events
@@ -252,6 +282,11 @@ pub mod irqs {
         if DEPTH.get().fetch_add(1, Ordering::Relaxed) == 0 {
             WERE_ON.get().store(daif & (1 << 7) == 0, Ordering::Relaxed);
         }
+    }
+
+    /// How many `mask` calls are not yet undone on this core.
+    pub fn depth() -> u32 {
+        DEPTH.get().load(Ordering::Relaxed)
     }
 
     pub fn unmask() {

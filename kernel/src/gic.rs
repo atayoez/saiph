@@ -16,7 +16,7 @@
 //! two, which the GIC-700's erratum 2941627 would need a workaround for.)
 
 use crate::acpi;
-use crate::sync::{IrqsOn, SpinLock};
+use crate::sync::{IrqsOn, Once, SpinLock};
 use crate::vm::{self, DEVICE_WINDOW};
 use core::sync::atomic::{AtomicU64, Ordering};
 use paging::{Kind, PAGE_SIZE};
@@ -70,9 +70,9 @@ crate::cpu_local! {
 /// set-up code changes it, never an interrupt handler.
 static CONFIG: SpinLock<(), IrqsOn> = SpinLock::new(());
 /// The redistributor ranges, mapped: (virtual, physical, length), and how
-/// many there are.
+/// many there are. Set once by `init`, then only read.
 type Ranges = ([(u64, u64, u64); 4], usize);
-static RANGES: SpinLock<Ranges, IrqsOn> = SpinLock::new(([(0, 0, 0); 4], 0));
+static RANGES: Once<Ranges> = Once::new();
 
 fn read32(addr: u64) -> u32 {
     // SAFETY: only called with addresses inside the mapped GIC blocks.
@@ -162,13 +162,11 @@ pub fn init(gic: &acpi::Gic) -> Result<Found, Error> {
     wait_clear(dist + GICD_CTLR, CTLR_RWP);
 
     // Map every redistributor range once; each core finds its own in them.
-    {
-        let mut ranges = RANGES.lock();
-        for (n, &(base, len)) in gic.redistributors[..gic.ranges].iter().enumerate() {
-            ranges.0[n] = (map(base, len)?, base, len);
-        }
-        ranges.1 = gic.ranges;
+    let mut ranges: Ranges = ([(0, 0, 0); 4], gic.ranges);
+    for (n, &(base, len)) in gic.redistributors[..gic.ranges].iter().enumerate() {
+        ranges.0[n] = (map(base, len)?, base, len);
     }
+    let _ = RANGES.set(ranges);
     DISTRIBUTOR.store(dist, Ordering::Release);
     Ok(Found {
         arch: (read32(dist + GICD_PIDR2) >> 4) & 0xf,
@@ -184,7 +182,7 @@ pub fn init_this_core() -> Result<u64, Error> {
     // Walk the ranges until a redistributor's affinity is ours. Each takes
     // 128 KiB, or 256 KiB with GICv4's two extra frames.
     let me = my_affinity();
-    let (ranges, count) = *RANGES.lock();
+    let &(ranges, count) = RANGES.get().ok_or(Error::NoRedistributor)?;
     let mut found = None;
     'ranges: for &(virt, base, len) in &ranges[..count] {
         let mut offset = 0;

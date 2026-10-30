@@ -17,8 +17,10 @@
 //! The locks are `lock_api` 0.5 mutexes: `lock()` returns a guard that
 //! unlocks when dropped and cannot be moved to another core.
 
+use core::cell::UnsafeCell;
 use core::marker::PhantomData;
-use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use core::mem::MaybeUninit;
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 
 /// What a lock does to interrupts while it is held.
 pub trait Guardian {
@@ -160,5 +162,45 @@ pub mod irqs {
             // isb makes a pending interrupt arrive right here.
             unsafe { core::arch::asm!("msr DAIFClr, #2", "isb", options(nostack)) };
         }
+    }
+}
+
+/// A value that is set once and then read by every core without a lock.
+/// Setting it publishes the value with a release store; `get` sees it
+/// through an acquire load, so a reader gets either nothing or all of it.
+pub struct Once<T> {
+    state: AtomicU8,
+    value: UnsafeCell<MaybeUninit<T>>,
+}
+
+const EMPTY: u8 = 0;
+const WRITING: u8 = 1;
+const READY: u8 = 2;
+
+// SAFETY: the value is written once, before READY is published, and only
+// read (shared) after that.
+unsafe impl<T: Send + Sync> Sync for Once<T> {}
+
+impl<T> Once<T> {
+    pub const fn new() -> Self {
+        Once { state: AtomicU8::new(EMPTY), value: UnsafeCell::new(MaybeUninit::uninit()) }
+    }
+
+    /// Set the value. Gives it back if a value was set (or is being set).
+    pub fn set(&self, value: T) -> Result<(), T> {
+        if self.state.compare_exchange(EMPTY, WRITING, Ordering::Acquire, Ordering::Relaxed).is_err() {
+            return Err(value);
+        }
+        // SAFETY: winning the exchange makes this the only writer, and no
+        // reader looks before READY.
+        unsafe { (*self.value.get()).write(value) };
+        self.state.store(READY, Ordering::Release);
+        Ok(())
+    }
+
+    /// The value, once it is set.
+    pub fn get(&self) -> Option<&T> {
+        // SAFETY: READY means the value was written, and it never changes again.
+        (self.state.load(Ordering::Acquire) == READY).then(|| unsafe { (*self.value.get()).assume_init_ref() })
     }
 }

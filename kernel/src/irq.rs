@@ -12,12 +12,12 @@
 use crate::gic;
 use crate::sync::{IrqsOff, SpinLock};
 use core::fmt::Write;
-use core::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
-/// A handler for each private interrupt (SGIs and PPIs).
-type Handlers = [Option<fn()>; 32];
-/// Interrupt handlers look into it, so it is an `IrqsOff` lock.
-static HANDLERS: SpinLock<Handlers, IrqsOff> = SpinLock::new([None; 32]);
+/// A handler for each private interrupt (SGIs and PPIs): the address of a
+/// `fn()`, 0 for none. Each entry is one value, so atomics are enough and
+/// taking an interrupt involves no lock.
+static HANDLERS: [AtomicUsize; 32] = [const { AtomicUsize::new(0) }; 32];
 crate::cpu_local! {
     /// How many handlers are running on this core.
     static IN_HANDLER: AtomicU32 = AtomicU32::new(0);
@@ -33,8 +33,8 @@ pub fn in_handler() -> bool {
 
 /// Run `handler` whenever interrupt `intid` (0-31) arrives.
 pub fn set_handler(intid: u32, handler: fn()) {
-    if let Some(slot) = HANDLERS.lock().get_mut(intid as usize) {
-        *slot = Some(handler);
+    if let Some(slot) = HANDLERS.get(intid as usize) {
+        slot.store(handler as usize, Ordering::Release);
     }
 }
 
@@ -52,15 +52,16 @@ pub fn handle() {
         if (1020..1024).contains(&intid) {
             break; // nothing (more) pending
         }
-        let handler = HANDLERS.lock().get(intid as usize).copied().flatten();
-        match handler {
-            Some(handler) => handler(),
-            None => {
-                // Nobody wants it: switch it off so it cannot come back.
-                gic::disable(intid);
-                UNEXPECTED.fetch_add(1, Ordering::Relaxed);
-                LAST_UNEXPECTED.store(intid, Ordering::Relaxed);
-            }
+        let handler = HANDLERS.get(intid as usize).map_or(0, |slot| slot.load(Ordering::Acquire));
+        if handler != 0 {
+            // SAFETY: nonzero entries are `fn()` addresses (`set_handler`).
+            let handler = unsafe { core::mem::transmute::<usize, fn()>(handler) };
+            handler();
+        } else {
+            // Nobody wants it: switch it off so it cannot come back.
+            gic::disable(intid);
+            UNEXPECTED.fetch_add(1, Ordering::Relaxed);
+            LAST_UNEXPECTED.store(intid, Ordering::Relaxed);
         }
         gic::end_of_interrupt(intid);
     }

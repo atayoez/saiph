@@ -10,7 +10,7 @@
 //! middle of whatever the core was doing. So they do little.
 
 use crate::gic;
-use crate::sync::{IrqsOff, SpinLock};
+use crate::sync::{self, IrqsOff, SpinLock, order};
 use core::fmt::Write;
 use core::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
@@ -47,6 +47,7 @@ pub fn unmask() {
 /// Called by the exception vector for every IRQ.
 pub fn handle() {
     IN_HANDLER.get().fetch_add(1, Ordering::Relaxed);
+    let held = sync::enter_handler();
     loop {
         let intid = gic::acknowledge();
         if (1020..1024).contains(&intid) {
@@ -65,6 +66,7 @@ pub fn handle() {
         }
         gic::end_of_interrupt(intid);
     }
+    sync::leave_handler(held);
     IN_HANDLER.get().fetch_sub(1, Ordering::Relaxed);
 }
 
@@ -99,7 +101,7 @@ pub fn self_test(out: &mut impl Write) -> bool {
         unsafe { core::arch::asm!("mrs {}, DAIF", out(reg) daif) };
         daif & (1 << 7) != 0
     };
-    let lock = SpinLock::<(), IrqsOff>::new(());
+    let lock = SpinLock::<(), IrqsOff, order::Test>::new(());
     let guard = lock.lock();
     let while_held = masked();
     drop(guard);

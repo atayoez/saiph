@@ -9,7 +9,7 @@
 //! Everything printed is also kept in a log (the newest 32 KiB), which
 //! `efi::save_log` saves for reading after a reboot.
 
-use crate::sync::{IrqsOff, SpinLock};
+use crate::sync::{IrqsOff, SpinLock, order};
 use crate::{screen, uart};
 use core::fmt::{self, Write};
 use core::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
@@ -30,7 +30,7 @@ pub fn log_byte(n: usize) -> u8 {
     LOG[n % LOG.len()].load(Ordering::Relaxed)
 }
 
-static LOCK: SpinLock<(), IrqsOff> = SpinLock::new(());
+static LOCK: SpinLock<(), IrqsOff, order::Console> = SpinLock::new(());
 
 pub struct Console;
 

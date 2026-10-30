@@ -18,7 +18,7 @@
 
 use crate::console;
 use crate::memory;
-use crate::sync::{IrqsOff, SpinLock};
+use crate::sync::{IrqsOff, SpinLock, order};
 use core::fmt::{self, Write};
 use core::sync::atomic::{AtomicBool, Ordering};
 use limine::request::{EfiMemmapRequest, EfiRequest};
@@ -92,7 +92,7 @@ struct Firmware {
 }
 
 /// One call at a time, with interrupts masked.
-static FIRMWARE: SpinLock<Option<Firmware>, IrqsOff> = SpinLock::new(None);
+static FIRMWARE: SpinLock<Option<Firmware>, IrqsOff, order::Firmware> = SpinLock::new(None);
 
 impl Firmware {
     fn alloc_table(&mut self) -> Option<u64> {

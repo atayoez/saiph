@@ -14,13 +14,106 @@
 //! forever; a lock that handlers use is therefore an `IrqsOff` lock, and
 //! there is no way to take it with interrupts on.
 //!
+//! And each lock's type names its place in the order locks must be taken
+//! in (its `Level`, see `order`): a core holding a lock may only take locks
+//! that come after it. Two cores taking two locks in opposite orders is how
+//! a deadlock happens, so every lock checks, each time it is taken, that
+//! this core holds no lock at its level or after it, and panics with both
+//! names if it does, the first time the wrong order runs, whether or not
+//! another core happens to collide (Linux's lockdep checks the same way).
+//! Taking a lock twice on one core is caught too, instead of hanging.
+//! A fully compile-time check (as in Fuchsia's netstack3) would need a
+//! token passed into every function that locks, and Rust's allocator
+//! interface, through which the heap's lock is taken, has no room for one;
+//! the orders the code relies on are checked at compile time with
+//! `comes_before` instead.
+//!
 //! The locks are `lock_api` 0.5 mutexes: `lock()` returns a guard that
 //! unlocks when dropped and cannot be moved to another core.
 
 use core::cell::UnsafeCell;
 use core::marker::PhantomData;
 use core::mem::MaybeUninit;
-use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
+use core::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, AtomicU64, Ordering};
+
+/// A lock's place in the order locks must be taken in.
+pub trait Level {
+    const RANK: u32;
+    const NAME: &'static str;
+}
+
+macro_rules! levels {
+    ($($(#[$doc:meta])* $name:ident = $rank:literal;)*) => {
+        $(
+            $(#[$doc])*
+            pub struct $name;
+            impl super::Level for $name {
+                const RANK: u32 = $rank;
+                const NAME: &'static str = stringify!($name);
+            }
+        )*
+
+        /// The name of the level with this rank.
+        pub fn name(rank: u32) -> &'static str {
+            match rank {
+                $($rank => stringify!($name),)*
+                _ => "?",
+            }
+        }
+    };
+}
+
+/// Every lock's level, in the order they may be taken: a core holding a
+/// lock may only take locks further down this list.
+pub mod order {
+    levels! {
+        /// The kernel heap. Growing it maps pages, so it comes first.
+        Heap = 1;
+        /// The page tables the kernel runs on.
+        PageTables = 2;
+        /// Calls into the UEFI firmware.
+        Firmware = 3;
+        /// The GIC's configuration registers.
+        GicConfig = 4;
+        /// Locks that only self-tests use.
+        Test = 5;
+        /// The console comes last, so anything may print while holding a lock.
+        Console = 6;
+    }
+}
+
+/// Fails to compile unless level `A` comes before level `B`. For code that
+/// takes a `B` lock while holding an `A` lock: `const _: () = comes_before::<A, B>();`
+pub const fn comes_before<A: Level, B: Level>() {
+    assert!(A::RANK < B::RANK, "lock order: this code takes these two locks in the wrong order");
+}
+
+crate::cpu_local! {
+    /// The levels of the locks this core holds, one bit per rank.
+    static HELD: AtomicU64 = AtomicU64::new(0);
+}
+
+/// Before taking a lock of level `L`: panic if this core holds a lock at
+/// `L`'s level or after it.
+fn check_order<L: Level>() {
+    let held = HELD.get().load(Ordering::Relaxed);
+    if held >> L::RANK != 0 {
+        let latest = 63 - held.leading_zeros();
+        panic!("lock order: taking a {} lock while holding a {} lock (see sync::order)", L::NAME, order::name(latest));
+    }
+}
+
+/// Entering an interrupt handler: it starts with no locks held (it is a
+/// context of its own; only `IrqsOn` locks can be held by the code it
+/// interrupted, and handlers never take those). Returns what to restore.
+pub fn enter_handler() -> u64 {
+    HELD.get().swap(0, Ordering::Relaxed)
+}
+
+/// Leaving an interrupt handler: back to the interrupted code's locks.
+pub fn leave_handler(held: u64) {
+    HELD.get().store(held, Ordering::Relaxed);
+}
 
 /// What a lock does to interrupts while it is held.
 pub trait Guardian {
@@ -55,15 +148,15 @@ impl Guardian for IrqsOn {
 }
 
 /// A spin lock around a `T`; `G` says what happens to interrupts while it
-/// is held.
-pub type SpinLock<T, G> = lock_api::Mutex<TicketLock<G>, T>;
+/// is held, `L` where it stands in the lock order.
+pub type SpinLock<T, G, L> = lock_api::Mutex<TicketLock<G, L>, T>;
 
-pub struct TicketLock<G> {
+pub struct TicketLock<G, L> {
     /// The next ticket to hand out.
     next: AtomicU32,
     /// The ticket whose holder may have the lock.
     serving: AtomicU32,
-    guardian: PhantomData<G>,
+    guardian: PhantomData<(G, L)>,
 }
 
 /// Holding a `TicketLock`. Not `Send`: the interrupt state it goes with is
@@ -73,16 +166,18 @@ pub struct Held(PhantomData<*mut ()>);
 // SAFETY: one ticket is served at a time; taking it is an acquire and
 // handing on the next one a release, so the holder sees everything the
 // previous holder wrote.
-unsafe impl<G: Guardian> lock_api::RawMutex for TicketLock<G> {
+unsafe impl<G: Guardian, L: Level> lock_api::RawMutex for TicketLock<G, L> {
     const INIT: Self = TicketLock { next: AtomicU32::new(0), serving: AtomicU32::new(0), guardian: PhantomData };
     type Guard = Held;
 
     fn lock(&self) -> Held {
         G::enter();
+        check_order::<L>();
         let ticket = self.next.fetch_add(1, Ordering::Relaxed);
         loop {
             let now = self.serving.load(Ordering::Acquire);
             if now == ticket {
+                HELD.get().fetch_or(1 << L::RANK, Ordering::Relaxed);
                 return Held(PhantomData);
             }
             wait_for_change(&self.serving, now);
@@ -93,7 +188,9 @@ unsafe impl<G: Guardian> lock_api::RawMutex for TicketLock<G> {
         G::enter();
         // Draw a ticket only if it would be served right away.
         let now = self.serving.load(Ordering::Acquire);
+        // (No order check: a try never waits, so it cannot deadlock.)
         if self.next.compare_exchange(now, now.wrapping_add(1), Ordering::Relaxed, Ordering::Relaxed).is_ok() {
+            HELD.get().fetch_or(1 << L::RANK, Ordering::Relaxed);
             return Some(Held(PhantomData));
         }
         G::exit();
@@ -101,6 +198,7 @@ unsafe impl<G: Guardian> lock_api::RawMutex for TicketLock<G> {
     }
 
     unsafe fn unlock(&self, _held: Held) {
+        HELD.get().fetch_and(!(1 << L::RANK), Ordering::Relaxed);
         self.serving.fetch_add(1, Ordering::Release);
         G::exit();
     }

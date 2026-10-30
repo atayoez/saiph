@@ -18,7 +18,7 @@
 use crate::{memory, mmu, screen};
 use limine::memmap;
 use paging::{ENTRIES, Kind, MapError, Mapper, PAGE_SIZE, TableMemory};
-use crate::sync::{IrqsOff, SpinLock};
+use crate::sync::{IrqsOff, SpinLock, order};
 
 /// Where device registers appear: this offset plus their physical address.
 /// Above the direct map (which ends below 0xffff_0100_0000_0000 for the O6's
@@ -27,7 +27,7 @@ pub const DEVICE_WINDOW: u64 = 0xffff_c000_0000_0000;
 
 /// The tables the kernel runs on, once `switch_to` has switched to them.
 /// The heap grows through them, so they are locked like the heap.
-static RUNNING: SpinLock<Option<Mapper<KernelTables>>, IrqsOff> = SpinLock::new(None);
+static RUNNING: SpinLock<Option<Mapper<KernelTables>>, IrqsOff, order::PageTables> = SpinLock::new(None);
 
 /// Page-table memory for the kernel: frames from the frame allocator,
 /// reached through the direct map.
@@ -295,6 +295,14 @@ pub fn map(va: u64, pa: u64, len: u64, kind: Kind) -> Result<(), Error> {
     // SAFETY: barriers only.
     unsafe { core::arch::asm!("dsb ishst", "isb") };
     Ok(())
+}
+
+/// `lock-order-test`: allocate while holding the page tables' lock, the
+/// opposite of the heap's order (heap, then page tables). The lock check
+/// panics, naming both, before a deadlock could ever happen.
+pub fn lock_order_test() {
+    let _tables = RUNNING.lock();
+    core::hint::black_box(alloc::boxed::Box::new(0u64));
 }
 
 /// Stop translating lower-half addresses (TCR.EPD0): any access there now

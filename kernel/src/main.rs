@@ -337,6 +337,10 @@ extern "C" fn continue_boot(later: usize) -> ! {
                 let _ = writeln!(out, "  stack-test: recursing until the stack runs out");
                 recurse(0);
             }
+            "lock-order-test" => {
+                let _ = writeln!(out, "  lock-order-test: allocating while holding the page tables' lock");
+                vm::lock_order_test();
+            }
             "wx-test" => {
                 let target = kmain as *const () as *mut u32;
                 let _ = writeln!(out, "  wx-test: writing to kernel code at {target:p}");

@@ -16,7 +16,7 @@
 //! two, which the GIC-700's erratum 2941627 would need a workaround for.)
 
 use crate::acpi;
-use crate::sync::{IrqsOn, Once, SpinLock};
+use crate::sync::{IrqsOn, Once, SpinLock, order};
 use crate::vm::{self, DEVICE_WINDOW};
 use core::sync::atomic::{AtomicU64, Ordering};
 use paging::{Kind, PAGE_SIZE};
@@ -68,7 +68,7 @@ crate::cpu_local! {
 }
 /// Read-modify-write changes to the configuration go one at a time. Only
 /// set-up code changes it, never an interrupt handler.
-static CONFIG: SpinLock<(), IrqsOn> = SpinLock::new(());
+static CONFIG: SpinLock<(), IrqsOn, order::GicConfig> = SpinLock::new(());
 /// The redistributor ranges, mapped: (virtual, physical, length), and how
 /// many there are. Set once by `init`, then only read.
 type Ranges = ([(u64, u64, u64); 4], usize);

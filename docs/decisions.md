@@ -81,6 +81,22 @@ whether the O6 supports them. The whole list was reviewed that way on
   Rust `SpinLockIrq`), so a lock that interrupt handlers use can't be taken
   with interrupts on. This replaced the `spin` crate (test-and-set, unfair,
   still on `lock_api` 0.4).
+- **Fewer locks, and a lock order** (2026-10-30), after looking into
+  "atomics instead of locks": Rust rules out data races, not deadlocks, and
+  an atomic only covers one value. So: atomics wherever one value is enough
+  (the interrupt handler table, per-core counters, flags, the log), a
+  write-once `sync::Once<T>` for data set at boot and only read after (the
+  GIC's redistributors, the frame allocator), and a lock-free frame
+  allocator. The remaining locks (heap, page tables, firmware calls, GIC
+  configuration, console) each name a level in `sync::order`; taking a lock
+  while holding one at its level or after it panics, naming both (checked
+  at every acquisition, like Linux's lockdep), and the nesting the code
+  relies on is asserted at compile time (`comes_before`). Fuchsia
+  netstack3's fully compile-time ordering needs a token threaded through
+  every function that locks, which Rust's allocator interface cannot carry.
+  Newer, not adopted yet: RCU or epoch-based reclamation (crossbeam-epoch,
+  seize) for data that is read far more often than written, once there are
+  threads.
 - **Interrupts and timer** (2026-10-29): the GIC-700 through the GICv3
   system-register interface (GICv5 is newer, but not on the O6). All
   interrupts are group 1 with one priority, so handlers are never
@@ -123,8 +139,10 @@ whether the O6 supports them. The whole list was reviewed that way on
   attributes table. Not chosen: a file on disk (needs a storage driver),
   RAM kept across the reboot (Linux's ramoops; fragile), the ACPI ERST
   (the O6 has none).
-- **Physical memory**: a bitmap frame allocator. Newer, not adopted yet:
-  LLFree (lock-free, per-core reservations), for when the other cores run.
+- **Physical memory**: a bitmap frame allocator, lock-free since
+  2026-10-30: atomic bitmap words, a frame is claimed with one `fetch_or`
+  (LLFree's basic idea). Newer, not adopted yet: LLFree's per-core
+  reservations, if cores ever contend for frames.
 - **Users** (2026-10-28): single-user. No root, no user accounts, no logins.
   Programs stay isolated from each other and from the kernel; that protection
   just isn't organised around who is logged in. How programs get their rights

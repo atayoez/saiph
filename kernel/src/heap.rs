@@ -11,7 +11,7 @@
 //! It works once the kernel runs on its own page tables (`vm::switch_to`);
 //! before that, every allocation fails.
 
-use crate::sync::{IrqsOff, SpinLock};
+use crate::sync::{IrqsOff, SpinLock, comes_before, order};
 use crate::{memory, vm};
 use core::alloc::{GlobalAlloc, Layout};
 use core::fmt::Write;
@@ -33,7 +33,10 @@ const GROW: u64 = 2 << 20;
 
 /// talc behind one of Saiph's locks. Interrupt handlers may allocate, so it
 /// is an `IrqsOff` lock.
-struct Heap(SpinLock<Talc<Pages, DefaultBinning>, IrqsOff>);
+struct Heap(SpinLock<Talc<Pages, DefaultBinning>, IrqsOff, order::Heap>);
+
+// Growing the heap (`Pages::acquire`) maps pages while the heap is locked.
+const _: () = comes_before::<order::Heap, order::PageTables>();
 
 #[global_allocator]
 static HEAP: Heap = Heap(SpinLock::new(Talc::new(Pages { mapped: 0, end: 0 })));
